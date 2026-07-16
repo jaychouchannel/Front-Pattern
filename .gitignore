@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 真实产物（每次跑会更新，不要在仓库提交实际产物）
+# 注：output/.gitkeep 已被跟踪，保留目录占位
+output/*.html
+output/*.json
+
+# 环境变量 / 密钥
+.env
+.env.local
+.env.*.local
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
