@@ -1,0 +1,7 @@
+--name: 个人作品集
+个人前端工程师作品集首页。
+顶部标题 "Hello, I'm Jane" + 副标题 "Frontend Engineer · 5年经验"。
+中部一张全宽 hero 图片。
+下方三张作品卡片：分别是项目 A、B、C，每张配封面图、标题、技术栈描述。
+最底部一个"联系我"按钮（mailto: jane@example.com）以及一个文本块显示 GitHub 主页地址 https://github.com/jane。
+风格极简，黑白灰为主。

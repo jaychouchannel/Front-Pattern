@@ -1,0 +1,5 @@
+# output/ — AI 生成工作流的产物目录
+
+`scripts/run_all.py` 与 `scripts/generate.py` 默认把生成结果（`.json` + `.html`）写到这里。
+
+跑一次 `--dry-run` 即可见到示例文件。`.gitkeep` 保证目录被 git 跟踪。
