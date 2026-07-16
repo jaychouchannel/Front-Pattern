@@ -910,6 +910,65 @@ function setupTemplateClick() {
   });
 }
 
+// ==================== 10b. 布局模板库 ====================
+
+/** 应用布局模板到当前页 */
+function applyTemplate(templateId) {
+  var tpl = window.TEMPLATES && TEMPLATES.find(function(t) { return t.id === templateId; });
+  if (!tpl) { showToast('模板未找到'); return; }
+  if (!tpl.elements || tpl.elements.length === 0) { showToast('模板为空'); return; }
+
+  pushHistory();
+  // 深拷贝元素，重新生成 ID
+  var fresh = tpl.elements.map(function(el) {
+    var copy = clone(el);
+    copy.id = uid();
+    return copy;
+  });
+  currentPage().elements = fresh;
+  clearSelection();
+  renderElements();
+  renderPropertyPanel();
+  showToast('已应用模板：' + tpl.name);
+}
+
+/** 渲染模板库 */
+function setupTemplateLibrary() {
+  var container = document.getElementById('template-library');
+  if (!container || !window.TEMPLATES) return;
+
+  container.innerHTML = '';
+  TEMPLATES.forEach(function(tpl) {
+    var card = document.createElement('div');
+    card.className = 'tpl-card';
+    card.innerHTML =
+      '<div class="tpl-thumb">' + (tpl.thumb || '📄') + '</div>' +
+      '<div class="tpl-name">' + tpl.name + '</div>' +
+      '<div class="tpl-desc">' + (tpl.desc || '') + '</div>';
+    card.addEventListener('click', function() {
+      applyTemplate(tpl.id);
+    });
+    container.appendChild(card);
+  });
+}
+
+/** 侧边栏 Tab 切换 */
+function setupSidebarTabs() {
+  var tabs = document.querySelectorAll('.sidebar-tab');
+  tabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      // 切换 tab 高亮
+      document.querySelectorAll('.sidebar-tab').forEach(function(t) { t.classList.remove('active'); });
+      tab.classList.add('active');
+      // 切换 panel 显示
+      var target = tab.dataset.tab;
+      document.querySelectorAll('.tab-panel').forEach(function(panel) {
+        panel.classList.toggle('hidden', panel.dataset.tabPanel !== target);
+      });
+    });
+  });
+}
+
 // ==================== 11. 属性面板 ====================
 
 function renderPropertyPanel() {
@@ -1572,6 +1631,9 @@ function init() {
 
   // 模板点击
   setupTemplateClick();
+  // 布局模板库
+  setupSidebarTabs();
+  setupTemplateLibrary();
   // 组件选择弹窗
   setupPicker();
   // 画布交互
