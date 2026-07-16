@@ -20,6 +20,8 @@ function createDefaultState() {
     },
     currentPageId: pageId,
     selectedElementId: null,
+    selectedElementIds: [],
+    _clipboard: null,
     history: { past: [], future: [] }
   };
 }
@@ -38,6 +40,55 @@ function selectedElement() {
   return currentElements().find(el => el.id === id) || null;
 }
 
+// 选中集合（多选支持）。始终以 selectedElementId 为主，selectedElementIds 为附加集合。
+function selectedElements() {
+  const ids = effectiveSelectedIds();
+  return ids.map(id => currentElements().find(el => el.id === id)).filter(Boolean);
+}
+
+function effectiveSelectedIds() {
+  const ids = [];
+  const set = new Set();
+  if (state.selectedElementId) { ids.push(state.selectedElementId); set.add(state.selectedElementId); }
+  (state.selectedElementIds || []).forEach(id => {
+    if (id && !set.has(id)) { ids.push(id); set.add(id); }
+  });
+  return ids;
+}
+
+function isSelected(id) {
+  if (state.selectedElementId === id) return true;
+  return (state.selectedElementIds || []).indexOf(id) !== -1;
+}
+
+// 统一设置选中（替换）。单选场景使用。
+function setSelected(id) {
+  state.selectedElementId = id;
+  state.selectedElementIds = [];
+}
+
+// 切换某 ID 的选中状态（shift-click 多选）
+function toggleSelected(id) {
+  if (state.selectedElementId === id) {
+    state.selectedElementId = null;
+    return;
+  }
+  const arr = state.selectedElementIds || [];
+  const idx = arr.indexOf(id);
+  if (idx === -1) {
+    if (state.selectedElementId) arr.push(state.selectedElementId);
+    state.selectedElementId = id;
+  } else {
+    arr.splice(idx, 1);
+    if (arr.length > 0) state.selectedElementId = arr[arr.length - 1];
+  }
+}
+
+function clearSelection() {
+  state.selectedElementId = null;
+  state.selectedElementIds = [];
+}
+
 function showToast(msg, duration) {
   duration = duration || 2000;
   const old = document.querySelector('.toast');
@@ -52,11 +103,13 @@ function showToast(msg, duration) {
 // ==================== 3. 历史记录（撤销/重做） ====================
 
 function pushHistory() {
-  // 只保留 pages/currentPage/selectedElementId 的快照，不含历史本身
+  // 快照保存所有多选相关字段
   const snapshot = {
     pages: clone(state.pages),
     currentPageId: state.currentPageId,
-    selectedElementId: state.selectedElementId
+    selectedElementId: state.selectedElementId,
+    selectedElementIds: (state.selectedElementIds || []).slice(),
+    _clipboard: state._clipboard
   };
   state.history.past.push(snapshot);
   if (state.history.past.length > 50) state.history.past.shift();
@@ -68,6 +121,8 @@ function restoreSnapshot(snap) {
   state.pages = clone(snap.pages);
   state.currentPageId = snap.currentPageId;
   state.selectedElementId = snap.selectedElementId;
+  state.selectedElementIds = (snap.selectedElementIds || []).slice();
+  state._clipboard = snap._clipboard;
 }
 
 function undo() {
@@ -114,7 +169,7 @@ function updateUndoRedoButtons() {
  */
 function createElement(type, rect) {
   const id = uid();
-  const base = { id, type, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  const base = { id, type, x: rect.x, y: rect.y, width: rect.width, height: rect.height, zIndex: 0 };
 
   switch (type) {
     case 'text':
@@ -295,7 +350,13 @@ function renderElements() {
       '<div class="empty-hint"><p>点击左侧模板或拖拽框选创建组件</p></div>';
     return;
   }
-  elements.forEach(el => {
+  // 按 zIndex 升序绘制（zIndex 大的在后，覆盖在上方）
+  const sorted = elements.slice().sort(function(a, b) {
+    var za = a.zIndex || 0, zb = b.zIndex || 0;
+    if (za !== zb) return za - zb;
+    return 0;
+  });
+  sorted.forEach(el => {
     const div = elementToDiv(el);
     container.appendChild(div);
   });
@@ -304,7 +365,10 @@ function renderElements() {
 /** 将元素数据转为 DOM 节点 */
 function elementToDiv(el) {
   const div = document.createElement('div');
-  div.className = 'canvas-el' + (el.id === state.selectedElementId ? ' selected' : '');
+  var cls = 'canvas-el';
+  if (isSelected(el.id)) cls += ' selected';
+  if (el.id === state.selectedElementId) cls += ' main-selected';
+  div.className = cls;
   div.dataset.elId = el.id;
   div.style.cssText = elementStyles(el);
 
@@ -315,18 +379,22 @@ function elementToDiv(el) {
   content.innerHTML = elementInnerHTML(el);
   div.appendChild(content);
 
-  // 调整手柄（八个方向）
-  const dirs = ['nw','n','ne','e','se','s','sw','w'];
-  dirs.forEach(d => {
-    const h = document.createElement('div');
-    h.className = 'resize-handle ' + d;
-    h.dataset.handle = d;
-    div.appendChild(h);
-  });
-
-  // 选中时拖拽移动
+  // 调整手柄（八个方向，仅主选中元素显示）
   if (el.id === state.selectedElementId) {
+    const dirs = ['nw','n','ne','e','se','s','sw','w'];
+    dirs.forEach(d => {
+      const h = document.createElement('div');
+      h.className = 'resize-handle ' + d;
+      h.dataset.handle = d;
+      div.appendChild(h);
+    });
+  }
+
+  // 所有选中元素支持拖拽移动；仅主选中元素显示调整手柄
+  if (isSelected(el.id)) {
     makeDraggable(div, el);
+  }
+  if (el.id === state.selectedElementId) {
     makeResizable(div, el);
   }
 
@@ -340,6 +408,7 @@ function elementStyles(el) {
   if (el.bgColor) s += 'background:' + el.bgColor + ';';
   if (el.radius) s += 'border-radius:' + el.radius + 'px;';
   if (el.type === 'text' && el.color) s += 'color:' + el.color + ';';
+  s += 'z-index:' + (el.zIndex||0) + ';';
   return s;
 }
 
@@ -394,54 +463,216 @@ function elementInnerHTML(el) {
 
 var _dragState = null;
 
-/** 点击元素选中（在画布鼠标按下时统一处理） */
-function selectElementById(id) {
-  if (state.selectedElementId === id) return;
+/** 点击元素选中 */
+function selectElementById(id, multi) {
+  if (multi) {
+    pushHistory();
+    toggleSelected(id);
+    renderElements();
+    renderPropertyPanel();
+    return;
+  }
+  if (state.selectedElementId === id && (state.selectedElementIds||[]).length === 0) return;
   pushHistory();
-  state.selectedElementId = id;
+  setSelected(id);
   renderElements();
   renderPropertyPanel();
 }
 
 /** 清除选中 */
 function deselectElement() {
-  if (!state.selectedElementId) return;
+  if (!state.selectedElementId && (state.selectedElementIds||[]).length === 0) return;
   pushHistory();
-  state.selectedElementId = null;
+  clearSelection();
   renderElements();
   renderPropertyPanel();
 }
 
-/** 使元素可拖拽移动 */
+/** 删除所有选中的元素 */
+function deleteSelectedElements() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  var arr = currentElements();
+  ids.forEach(function(id) {
+    var idx = arr.findIndex(function(e) { return e.id === id; });
+    if (idx >= 0) arr.splice(idx, 1);
+  });
+  clearSelection();
+  renderElements();
+  renderPropertyPanel();
+  showToast('已删除 ' + ids.length + ' 个模块');
+}
+
+// ==================== Z-INDEX 层级操作 ====================
+
+/** 获取当前页最大 zIndex */
+function maxZIndex() {
+  var max = 0;
+  currentElements().forEach(function(e) { if ((e.zIndex||0) > max) max = e.zIndex||0; });
+  return max;
+}
+
+/** 将选中元素移到最前 */
+function bringToFront() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  var next = maxZIndex() + 1;
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) el.zIndex = next++;
+  });
+  renderElements();
+}
+
+/** 将选中元素移到最后 */
+function sendToBack() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  var next = 0;
+  // 把所有非选中元素的 z-index 推后
+  currentElements().forEach(function(e) {
+    if (ids.indexOf(e.id) === -1) {
+      e.zIndex = (e.zIndex || 0) + ids.length;
+    }
+  });
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) el.zIndex = next++;
+  });
+  renderElements();
+}
+
+/** 上移一层 */
+function bringForward() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) el.zIndex = (el.zIndex || 0) + 1;
+  });
+  renderElements();
+}
+
+/** 下移一层 */
+function sendBackward() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) el.zIndex = Math.max(0, (el.zIndex || 0) - 1);
+  });
+  renderElements();
+}
+
+// ==================== 复制 / 粘贴 / 克隆 ====================
+
+/** 复制选中元素到内存剪贴板 */
+function copySelected() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  state._clipboard = [];
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) state._clipboard.push(clone(el));
+  });
+  showToast('已复制 ' + state._clipboard.length + ' 个模块');
+}
+
+/** 粘贴剪贴板中的元素 */
+function pasteClipboard() {
+  if (!state._clipboard || state._clipboard.length === 0) {
+    showToast('剪贴板为空');
+    return;
+  }
+  pushHistory();
+  state._clipboard.forEach(function(el) {
+    var copy = clone(el);
+    copy.id = uid();
+    copy.x += 20;
+    copy.y += 20;
+    currentElements().push(copy);
+  });
+  // 选中刚刚粘贴的
+  var pasted = currentElements().slice(-state._clipboard.length);
+  clearSelection();
+  state.selectedElementId = pasted[0].id;
+  state.selectedElementIds = pasted.map(function(e) { return e.id; });
+  renderElements();
+  renderPropertyPanel();
+  showToast('已粘贴 ' + state._clipboard.length + ' 个模块');
+}
+
+/** 克隆（Ctrl+D）：复制并原地粘贴 */
+function duplicateSelected() {
+  var ids = effectiveSelectedIds();
+  if (ids.length === 0) return;
+  pushHistory();
+  state._clipboard = [];
+  ids.forEach(function(id) {
+    var el = currentElements().find(function(e) { return e.id === id; });
+    if (el) state._clipboard.push(clone(el));
+  });
+  pasteClipboard();
+}
+
+/** 使元素可拖拽移动（同时移动所有选中元素） */
 function makeDraggable(div, el) {
   div.addEventListener('mousedown', function(e) {
     if (e.target.closest('.resize-handle')) return;
     if (isPreviewMode()) return;
     e.preventDefault();
     e.stopPropagation();
+    // 如果当前点击的元素不在选中集合里，则切换为单选
+    if (!isSelected(el.id)) {
+      setSelected(el.id);
+      renderElements();
+      renderPropertyPanel();
+    }
     var startX = e.clientX, startY = e.clientY;
-    var origX = el.x, origY = el.y;
-    _dragState = { el: el, div: div, startX: startX, startY: startY, origX: origX, origY: origY, moved: false };
+    var ids = effectiveSelectedIds();
+    var origs = {};
+    ids.forEach(function(id) {
+      var e2 = currentElements().find(function(x) { return x.id === id; });
+      if (e2) origs[id] = { x: e2.x, y: e2.y };
+    });
+    _dragState = { startX: startX, startY: startY, origs: origs, moved: false };
+    var historyPushed = false;
 
     function onMove(ev) {
       var dx = ev.clientX - startX;
       var dy = ev.clientY - startY;
-      el.x = Math.max(0, origX + dx);
-      el.y = Math.max(0, origY + dy);
-      el.x = Math.round(el.x / 5) * 5; // 吸附辅助
-      el.y = Math.round(el.y / 5) * 5;
+      if (!historyPushed && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) {
+        pushHistory();
+        historyPushed = true;
+      }
+      ids.forEach(function(id) {
+        var e2 = currentElements().find(function(x) { return x.id === id; });
+        if (!e2 || !origs[id]) return;
+        e2.x = Math.max(0, origs[id].x + dx);
+        e2.y = Math.max(0, origs[id].y + dy);
+        e2.x = Math.round(e2.x / 5) * 5;
+        e2.y = Math.round(e2.y / 5) * 5;
+      });
       _dragState.moved = true;
-      div.style.left = el.x + 'px';
-      div.style.top = el.y + 'px';
+      // 更新所有选中元素的位置
+      var cont = document.getElementById('canvas-elements');
+      ids.forEach(function(id) {
+        var node = cont.querySelector('[data-el-id="' + id + '"]');
+        if (node) {
+          var e2 = currentElements().find(function(x) { return x.id === id; });
+          if (e2) { node.style.left = e2.x + 'px'; node.style.top = e2.y + 'px'; }
+        }
+      });
     }
 
     function onUp() {
       document.removeEventListener('mousemove', onMove);
       document.removeEventListener('mouseup', onUp);
-      if (!_dragState.moved) {
-        // 不动 = 只是点击选中
-        return;
-      }
       _dragState = null;
     }
 
@@ -508,15 +739,26 @@ function setupCanvasInteraction() {
     // 仅编辑模式
     if (isPreviewMode()) return;
 
+    // shift 按下时进入多选模式
+    var shiftKey = e.shiftKey;
+
     // 如果点击在某个元素或手柄上：由元素自身处理
     if (e.target.closest('.canvas-el') || e.target.closest('.resize-handle')) {
-      // 让事件冒泡但需要选中对应元素
       var elDiv = e.target.closest('.canvas-el');
       if (elDiv) {
         var elId = elDiv.dataset.elId;
-        if (state.selectedElementId !== elId) {
+        if (shiftKey) {
+          // shift+click：切换多选
           pushHistory();
-          state.selectedElementId = elId;
+          toggleSelected(elId);
+          renderElements();
+          renderPropertyPanel();
+          return;
+        }
+        // 普通点击：单选
+        if (!isSelected(elId)) {
+          pushHistory();
+          setSelected(elId);
           renderElements();
           renderPropertyPanel();
         }
@@ -524,9 +766,16 @@ function setupCanvasInteraction() {
       return;
     }
 
-    // 点击空白：清除选中并开始框选
+    // 点击空白
     if (!e.target.closest('#canvas')) return;
-    deselectElement();
+
+    if (!shiftKey) {
+      deselectElement();
+    } else {
+      // shift+单击空白开始框选多选
+      state.selectedElementId = null;
+      state.selectedElementIds = [];
+    }
 
     var rect = canvas.getBoundingClientRect();
     var startX = e.clientX - rect.left;
@@ -562,11 +811,30 @@ function setupCanvasInteraction() {
 
       var w = Math.abs(curX - startX);
       var h = Math.abs(curY - startY);
-      // 短距离视为点击空白，不弹窗
+      // 短距离视为点击空白
       if (w < 20 || h < 20) return;
 
       var left = Math.min(startX, curX);
       var top = Math.min(startY, curY);
+      var right = left + w, bottom = top + h;
+
+      // shift 拖拽 = 多选框选；普通拖拽 = 创建组件
+      if (shiftKey) {
+        var hits = currentElements().filter(function(el) {
+          var elR = el.x + el.width, elB = el.y + el.height;
+          return el.x < right && elR > left && el.y < bottom && elB > top;
+        });
+        if (hits.length > 0) {
+          pushHistory();
+          // 替换为这些选中
+          state.selectedElementIds = hits.map(function(e) { return e.id; });
+          state.selectedElementId = hits[0].id;
+          renderElements();
+          renderPropertyPanel();
+          showToast('已选中 ' + hits.length + ' 个模块');
+        }
+        return;
+      }
 
       // 弹出组件选择器
       openPicker({
@@ -646,11 +914,49 @@ function setupTemplateClick() {
 
 function renderPropertyPanel() {
   var panel = document.getElementById('property-content');
-  var el = selectedElement();
-  if (!el) {
+  var ids = effectiveSelectedIds();
+
+  if (ids.length === 0) {
     panel.innerHTML = '<div class="flex flex-col items-center justify-center py-12 text-gray-300"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg><p class="mt-2 text-xs">点击画布上的模块编辑属性</p></div>';
     return;
   }
+
+  // 多选：显示批量操作面板
+  if (ids.length > 1) {
+    panel.innerHTML =
+      '<div class="prop-group"><label>已选中 ' + ids.length + ' 个模块</label>' +
+        '<div class="text-xs text-gray-400 mt-1">按住 Shift 点击画布添加 / 移除选中</div>' +
+      '</div>' +
+      '<div class="prop-group"><label>层级</label><div class="prop-row">' +
+        '<button id="btn-front" class="prop-btn">置顶</button>' +
+        '<button id="btn-back" class="prop-btn">置底</button>' +
+      '</div></div>' +
+      '<div class="prop-group"><div class="prop-row">' +
+        '<button id="btn-fwd" class="prop-btn">上移一层</button>' +
+        '<button id="btn-bwd" class="prop-btn">下移一层</button>' +
+      '</div></div>' +
+      '<div class="prop-group"><label>对齐</label><div class="prop-row">' +
+        '<button id="btn-align-left" class="prop-btn">左对齐</button>' +
+        '<button id="btn-align-center" class="prop-btn">水平居中</button>' +
+        '<button id="btn-align-right" class="prop-btn">右对齐</button>' +
+      '</div></div>' +
+      '<div class="prop-group"><div class="prop-row">' +
+        '<button id="btn-align-top" class="prop-btn">顶对齐</button>' +
+        '<button id="btn-align-middle" class="prop-btn">垂直居中</button>' +
+        '<button id="btn-align-bottom" class="prop-btn">底对齐</button>' +
+      '</div></div>' +
+      '<div class="prop-group"><label>批量操作</label><div class="prop-row">' +
+        '<button id="btn-duplicate" class="prop-btn">克隆 (Ctrl+D)</button>' +
+        '<button id="btn-copy" class="prop-btn">复制</button>' +
+      '</div></div>' +
+      '<div class="prop-group"><button id="btn-del-el" class="w-full py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200">删除选中 ' + ids.length + ' 个模块</button></div>';
+
+    bindMultiSelectButtons();
+    return;
+  }
+
+  var el = selectedElement();
+  if (!el) return;
 
   var html = '<div class="prop-group"><label>类型</label><div class="text-base text-gray-700 font-medium">' + el.type + ' #' + el.id.slice(-4) + '</div></div>';
 
@@ -662,6 +968,11 @@ function renderPropertyPanel() {
   html += '<div class="prop-group"><label>尺寸 (W / H)</label><div class="prop-row">' +
           '<input type="number" id="prop-w" value="' + el.width + '" min="40">' +
           '<input type="number" id="prop-h" value="' + el.height + '" min="30">' +
+          '</div></div>';
+
+  // 层级
+  html += '<div class="prop-group"><label>层级 (z-index)</label><div class="prop-row">' +
+          '<input type="number" id="prop-zIndex" value="' + (el.zIndex||0) + '" min="0">' +
           '</div></div>';
 
   // 种类特定属性
@@ -677,11 +988,71 @@ function renderPropertyPanel() {
     html += cardProps(el);
   }
 
+  // 层级操作
+  html += '<div class="prop-group"><label>层级操作</label><div class="prop-row">' +
+          '<button id="btn-front" class="prop-btn">置顶</button>' +
+          '<button id="btn-back" class="prop-btn">置底</button>' +
+          '<button id="btn-fwd" class="prop-btn">上移</button>' +
+          '<button id="btn-bwd" class="prop-btn">下移</button>' +
+          '</div></div>';
+
+  // 复制粘贴
+  html += '<div class="prop-group"><div class="prop-row">' +
+          '<button id="btn-duplicate" class="prop-btn">克隆 (Ctrl+D)</button>' +
+          '<button id="btn-copy" class="prop-btn">复制 (Ctrl+C)</button>' +
+          '</div></div>';
+
   // 删除按钮
   html += '<div class="prop-group"><button id="btn-del-el" class="w-full py-2 text-sm bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition border border-red-200">删除该模块</button></div>';
 
   panel.innerHTML = html;
   bindPropertyInputs(el);
+}
+
+function bindMultiSelectButtons() {
+  var map = {
+    'btn-front': bringToFront,
+    'btn-back': sendToBack,
+    'btn-fwd': bringForward,
+    'btn-bwd': sendBackward,
+    'btn-duplicate': duplicateSelected,
+    'btn-copy': copySelected,
+    'btn-del-el': deleteSelectedElements,
+    'btn-align-left': function() { alignSelected('left'); },
+    'btn-align-center': function() { alignSelected('center-x'); },
+    'btn-align-right': function() { alignSelected('right'); },
+    'btn-align-top': function() { alignSelected('top'); },
+    'btn-align-middle': function() { alignSelected('middle-y'); },
+    'btn-align-bottom': function() { alignSelected('bottom'); }
+  };
+  Object.keys(map).forEach(function(id) {
+    var node = document.getElementById(id);
+    if (node) node.onclick = map[id];
+  });
+}
+
+/** 多选对齐 */
+function alignSelected(mode) {
+  var els = selectedElements();
+  if (els.length < 2) return;
+  pushHistory();
+  // 计算公共边界
+  var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  els.forEach(function(el) {
+    if (el.x < minX) minX = el.x;
+    if (el.x + el.width > maxX) maxX = el.x + el.width;
+    if (el.y < minY) minY = el.y;
+    if (el.y + el.height > maxY) maxY = el.y + el.height;
+  });
+  els.forEach(function(el) {
+    if (mode === 'left') el.x = minX;
+    else if (mode === 'right') el.x = maxX - el.width;
+    else if (mode === 'center-x') el.x = (minX + maxX) / 2 - el.width / 2;
+    else if (mode === 'top') el.y = minY;
+    else if (mode === 'bottom') el.y = maxY - el.height;
+    else if (mode === 'middle-y') el.y = (minY + maxY) / 2 - el.height / 2;
+  });
+  renderElements();
 }
 
 function textProps(el) {
@@ -757,6 +1128,7 @@ function bindPropertyInputs(el) {
   bindNum(el, 'prop-y', 'y');
   bindNum(el, 'prop-w', 'width');
   bindNum(el, 'prop-h', 'height');
+  bindNum(el, 'prop-zIndex', 'zIndex');
 
   // 种类特定
   if (el.type === 'text') {
@@ -789,18 +1161,20 @@ function bindPropertyInputs(el) {
     bindNum(el, 'prop-radius', 'radius');
   }
 
+  // 层级操作按钮
+  var lvlMap = { 'btn-front': bringToFront, 'btn-back': sendToBack, 'btn-fwd': bringForward, 'btn-bwd': sendBackward };
+  Object.keys(lvlMap).forEach(function(id) {
+    var node = document.getElementById(id);
+    if (node) node.onclick = lvlMap[id];
+  });
+  var dup = document.getElementById('btn-duplicate'); if (dup) dup.onclick = duplicateSelected;
+  var cpy = document.getElementById('btn-copy'); if (cpy) cpy.onclick = copySelected;
+
   // 删除按钮
   var delBtn = document.getElementById('btn-del-el');
   if (delBtn) {
     delBtn.addEventListener('click', function() {
-      pushHistory();
-      var arr = currentElements();
-      var idx = arr.findIndex(function(e) { return e.id === el.id; });
-      if (idx >= 0) arr.splice(idx, 1);
-      state.selectedElementId = null;
-      renderElements();
-      renderPropertyPanel();
-      showToast('已删除模块');
+      deleteSelectedElements();
     });
   }
 }
@@ -973,12 +1347,16 @@ function previewClickHandler(e) {
 function exportHTML() {
   var allPages = Object.values(state.pages);
 
-  // 生成每页的元素 HTML
+  // 生成每页的元素 HTML（按 zIndex 排序输出，确保层级正确）
   var pagesHTML = allPages.map(function(page) {
-    var elsHTML = page.elements.map(function(el) {
+    var sorted = page.elements.slice().sort(function(a, b) {
+      return (a.zIndex||0) - (b.zIndex||0);
+    });
+    var elsHTML = sorted.map(function(el) {
       var style = 'position:absolute;' +
         'left:' + el.x + 'px;top:' + el.y + 'px;' +
-        'width:' + el.width + 'px;height:' + el.height + 'px;';
+        'width:' + el.width + 'px;height:' + el.height + 'px;' +
+        'z-index:' + (el.zIndex||0) + ';';
       if (el.bgColor) style += 'background:' + el.bgColor + ';';
       if (el.radius) style += 'border-radius:' + el.radius + 'px;';
       var inner = exportElementHTML(el);
@@ -1253,30 +1631,55 @@ function handleKeydown(e) {
     if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
     else if (e.key === 's') { e.preventDefault(); saveProject(); }
+    else if (e.key === 'c') { e.preventDefault(); copySelected(); }
+    else if (e.key === 'v') { e.preventDefault(); pasteClipboard(); }
+    else if (e.key === 'd') { e.preventDefault(); duplicateSelected(); }
+    else if (e.key === 'a') {
+      e.preventDefault();
+      // 全选当前页元素
+      if (currentElements().length > 0) {
+        pushHistory();
+        state.selectedElementIds = currentElements().map(function(el) { return el.id; });
+        state.selectedElementId = state.selectedElementIds[0];
+        renderElements();
+        renderPropertyPanel();
+      }
+    }
     return;
   }
 
   if (e.key === 'Delete' || e.key === 'Backspace') {
-    if (state.selectedElementId) {
+    if (effectiveSelectedIds().length > 0) {
       e.preventDefault();
-      var el = selectedElement();
-      if (el) {
-        pushHistory();
-        var arr = currentElements();
-        var idx = arr.indexOf(el);
-        if (idx >= 0) arr.splice(idx, 1);
-        state.selectedElementId = null;
-        renderElements();
-        renderPropertyPanel();
-        showToast('已删除模块');
-      }
+      deleteSelectedElements();
     }
+  }
+
+  // 方向键微调（1px，shift+方向键 10px）
+  var ids = effectiveSelectedIds();
+  if (ids.length > 0 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].indexOf(e.key) !== -1) {
+    e.preventDefault();
+    var step = e.shiftKey ? 10 : 1;
+    if (!_arrowMoveStarted) { pushHistory(); _arrowMoveStarted = true; }
+    ids.forEach(function(id) {
+      var el = currentElements().find(function(x) { return x.id === id; });
+      if (!el) return;
+      if (e.key === 'ArrowLeft') el.x = Math.max(0, el.x - step);
+      if (e.key === 'ArrowRight') el.x = el.x + step;
+      if (e.key === 'ArrowUp') el.y = Math.max(0, el.y - step);
+      if (e.key === 'ArrowDown') el.y = el.y + step;
+    });
+    renderElements();
+    renderPropertyPanel();
   }
 
   if (e.key === 'Escape') {
     deselectElement();
   }
 }
+
+var _arrowMoveStarted = false;
+document.addEventListener('keyup', function() { _arrowMoveStarted = false; });
 
 // 启动
 document.addEventListener('DOMContentLoaded', function() {
