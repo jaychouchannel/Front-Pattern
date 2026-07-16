@@ -89,6 +89,87 @@ body {
   border: 1px dashed #d1d5db; border-radius: 8px; background: #fafafa;
 }
 
+/* —— AI 输入面板 —— */
+.ai-field { margin-bottom: 10px; }
+.ai-field label {
+  display: block; font-size: 11px; font-weight: 600; color: #6b7280;
+  margin-bottom: 4px; text-transform: uppercase; letter-spacing: .3px;
+}
+.ai-input, .ai-select, .ai-textarea {
+  width: 100%; padding: 6px 8px; font-size: 12px;
+  border: 1px solid #d1d5db; border-radius: 6px;
+  font-family: inherit; color: #1f2937; background: #fff;
+  transition: border-color .15s;
+}
+.ai-input:focus, .ai-select:focus, .ai-textarea:focus {
+  outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,.15);
+}
+.ai-textarea { resize: vertical; min-height: 70px; font-family: inherit; }
+.ai-key-actions { display: flex; gap: 6px; margin-top: 6px; }
+.ai-mini-btn {
+  padding: 4px 10px; font-size: 11px; border: 1px solid #d1d5db;
+  background: #fff; color: #4b5563; border-radius: 4px; cursor: pointer;
+  transition: all .12s;
+}
+.ai-mini-btn:hover { background: #f3f4f6; border-color: #9ca3af; }
+.ai-hint {
+  font-size: 10px; color: #9ca3af; margin-top: 4px; line-height: 1.4;
+}
+.ai-generate-btn {
+  width: 100%; padding: 8px 12px; font-size: 13px; font-weight: 600;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: #fff; border: none; border-radius: 6px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: all .15s;
+}
+.ai-generate-btn:hover:not(:disabled) {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  transform: translateY(-1px); box-shadow: 0 2px 8px rgba(99,102,241,.3);
+}
+.ai-generate-btn:disabled { opacity: .6; cursor: not-allowed; }
+.ai-spinner {
+  width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.4);
+  border-top-color: #fff; border-radius: 50%;
+  animation: ai-spin .7s linear infinite;
+}
+@keyframes ai-spin { to { transform: rotate(360deg); } }
+.ai-status {
+  margin-top: 8px; padding: 8px 10px; font-size: 11px; border-radius: 6px;
+  line-height: 1.5;
+}
+.ai-status.error { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.ai-status.info { background: #eff6ff; color: #1d4ed8; border: 1px solid #dbeafe; }
+.ai-status.success { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+
+/* —— 生成位置确认弹窗 —— */
+.ai-dialog-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center; z-index: 1000;
+}
+.ai-dialog {
+  background: #fff; border-radius: 8px; padding: 20px;
+  width: 320px; box-shadow: 0 10px 40px rgba(0,0,0,.2);
+}
+.ai-dialog h4 {
+  font-size: 14px; font-weight: 600; color: #1f2937; margin-bottom: 8px;
+}
+.ai-dialog p {
+  font-size: 12px; color: #6b7280; margin-bottom: 16px; line-height: 1.5;
+}
+.ai-dialog-actions {
+  display: flex; gap: 8px; justify-content: flex-end;
+}
+.ai-dialog-actions button {
+  padding: 6px 14px; font-size: 12px; font-weight: 500;
+  border: 1px solid #d1d5db; background: #fff; color: #4b5563;
+  border-radius: 6px; cursor: pointer; transition: all .12s;
+}
+.ai-dialog-actions button:hover { background: #f3f4f6; }
+.ai-dialog-actions .primary {
+  background: #2563eb; color: #fff; border-color: #2563eb;
+}
+.ai-dialog-actions .primary:hover { background: #1d4ed8; }
+
 /* —— 页面列表 —— */
 .page-list { max-height: 260px; overflow-y: auto; }
 .page-item {
