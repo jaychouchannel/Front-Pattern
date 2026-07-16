@@ -1,0 +1,15 @@
+# front-pattern Python 脚本依赖声明
+#
+# 本项目脚本力求零第三方依赖，仅使用 Python 标准库即可运行：
+#   - urllib     HTTP 调用
+#   - json       AI 返回解析
+#   - argparse   CLI
+#   - dataclasses 配置封装
+#
+# 最低 Python 版本：3.10（typing.X | None 语法）
+#
+# 如需自动加载 .env，可选安装 python-dotenv，
+# 但 generate.py / run_all.py 不强依赖它，直接用环境变量或 --api-key 参数即可。
+
+# 可选：
+# python-dotenv>=1.0.0
