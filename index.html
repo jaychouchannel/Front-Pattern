@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>可视化拼图编辑器 - Puzzle Builder</title>
+<script src="https://cdn.tailwindcss.com">
+</script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ==================== 顶部工具栏 ==================== -->
+  <header id="toolbar" class="bg-white border-b border-gray-200 px-4 py-2 flex items-center gap-3 shrink-0 z-30">
+    <div class="flex items-center gap-2 mr-2">
+      <span class="text-xl font-bold text-blue-600">🧩</span>
+      <span class="font-semibold text-gray-700 text-sm whitespace-nowrap">拼图编辑器</span>
+    </div>
+
+    <div class="h-5 w-px bg-gray-300"></div>
+
+    <!-- 撤销/重做 -->
+    <button id="btn-undo" class="toolbar-btn" title="撤销 (Ctrl+Z)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h13a4 4 0 0 1 0 8H7"/><polyline points="7 6 3 10 7 14"/></svg>
+    </button>
+    <button id="btn-redo" class="toolbar-btn" title="重做 (Ctrl+Shift+Z)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10H8a4 4 0 0 0 0 8h9"/><polyline points="17 6 21 10 17 14"/></svg>
+    </button>
+
+    <div class="h-5 w-px bg-gray-300"></div>
+
+    <!-- 设备切换 (仅预览模式可见) -->
+    <select id="device-select" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-600 hidden">
+      <option value="1200">💻 桌面 (1200px)</option>
+      <option value="768">📱 平板 (768px)</option>
+      <option value="375">📱 手机 (375px)</option>
+    </select>
+
+    <!-- 预览/编辑切换 -->
+    <button id="btn-preview" class="toolbar-btn text-green-600" title="预览模式">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+      <span>预览</span>
+    </button>
+
+    <div class="flex-1"></div>
+
+    <!-- 导出 / 保存 -->
+    <button id="btn-export" class="toolbar-btn text-purple-600" title="导出完整HTML">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <span>导出</span>
+    </button>
+    <button id="btn-save" class="toolbar-btn text-blue-600" title="保存项目 (Ctrl+S)">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+      <span>保存</span>
+    </button>
+
+    <!-- 新手引导 -->
+    <button id="btn-help" class="toolbar-btn text-amber-600" title="使用帮助">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      <span>帮助</span>
+    </button>
+  </header>
+
+  <!-- ==================== 主内容区 ==================== -->
+  <div class="flex flex-1 overflow-hidden">
+
+    <!-- ========== 左侧面板 ========== -->
+    <aside id="left-panel" class="left-panel">
+      <!-- 组件模板 -->
+      <div class="panel-section border-b border-gray-100">
+        <h3>📦 组件模板</h3>
+        <div class="template-grid">
+          <div class="template-item" data-type="text"><span class="icon">📝</span>文本</div>
+          <div class="template-item" data-type="image"><span class="icon">🖼️</span>图片</div>
+          <div class="template-item" data-type="video"><span class="icon">🎬</span>视频</div>
+          <div class="template-item" data-type="button"><span class="icon">🔘</span>按钮</div>
+          <div class="template-item" data-type="card"><span class="icon">📇</span>卡片</div>
+        </div>
+        <p class="text-[10px] text-gray-400 mt-2 leading-tight">💡 点击模板添加模块，或在画布上拖拽框选创建</p>
+      </div>
+
+      <!-- 页面管理 -->
+      <div class="panel-section flex-1 flex flex-col min-h-0">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="mb-0">📄 页面管理</h3>
+          <button id="btn-add-page" class="text-blue-600 hover:text-blue-800 text-lg leading-none p-1 rounded hover:bg-blue-50" title="新建页面">+</button>
+        </div>
+        <div id="page-list" class="page-list flex-1"></div>
+      </div>
+    </aside>
+
+    <!-- ========== 中间画布 ========== -->
+    <main id="canvas-area" class="flex-1 relative overflow-auto bg-gray-200">
+      <!-- 网格背景包裹层 -->
+      <div id="canvas-wrapper" class="canvas-wrapper">
+        <!-- 模拟浏览器：预览时显示设备外框 -->
+        <div id="canvas" class="canvas">
+          <!-- 选择框 (拖拽创建组件时显示) -->
+          <div id="selection-box" class="hidden"></div>
+          <!-- 元素将动态渲染到这里 -->
+          <div id="canvas-elements" class="canvas-elements"></div>
+        </div>
+        <!-- 画布尺寸提示 -->
+        <div id="canvas-size-label" class="absolute bottom-2 right-3 text-[10px] text-gray-400 bg-white/80 px-1.5 py-0.5 rounded"></div>
+      </div>
+    </main>
+
+    <!-- ========== 右侧属性面板 ========== -->
+    <aside id="right-panel" class="right-panel">
+      <div class="panel-section">
+        <h3>🔧 属性设置</h3>
+        <div id="property-content" class="text-sm text-gray-500">
+          <div class="flex flex-col items-center justify-center py-12 text-gray-300">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <p class="mt-2 text-xs">点击画布上的模块编辑属性</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ==================== 组件选择弹窗 ==================== -->
+  <div id="picker-overlay" class="hidden fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
+       style="backdrop-filter:blur(2px)">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-[480px] max-w-[90vw]">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">选择要添加的模块</h3>
+      <div class="grid grid-cols-5 gap-3 mb-4">
+        <div class="picker-item" data-type="text">
+          <div class="picker-icon">📝</div>
+          <div class="picker-label">文本</div>
+        </div>
+        <div class="picker-item" data-type="image">
+          <div class="picker-icon">🖼️</div>
+          <div class="picker-label">图片</div>
+        </div>
+        <div class="picker-item" data-type="video">
+          <div class="picker-icon">🎬</div>
+          <div class="picker-label">视频</div>
+        </div>
+        <div class="picker-item" data-type="button">
+          <div class="picker-icon">🔘</div>
+          <div class="picker-label">按钮</div>
+        </div>
+        <div class="picker-item" data-type="card">
+          <div class="picker-icon">📇</div>
+          <div class="picker-label">卡片</div>
+        </div>
+      </div>
+      <button id="picker-cancel" class="w-full py-2 text-sm text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-50 transition">取消</button>
+    </div>
+  </div>
+
+  <!-- ==================== 帮助弹窗 ==================== -->
+  <div id="help-overlay" class="hidden fixed inset-0 z-50 bg-black/30 flex items-center justify-center"
+       style="backdrop-filter:blur(2px)">
+    <div class="bg-white rounded-xl shadow-2xl p-6 w-[520px] max-w-[90vw] max-h-[80vh] overflow-y-auto">
+      <h3 class="text-lg font-semibold text-gray-800 mb-3">🎯 使用指南</h3>
+      <div class="space-y-3 text-sm text-gray-600">
+        <div><strong class="text-gray-800">📦 添加模块：</strong>点击左侧「组件模板」或在画布上拖拽框选区域，选择模块类型</div>
+        <div><strong class="text-gray-800">✋ 移动模块：</strong>点击选中后拖拽模块到目标位置</div>
+        <div><strong class="text-gray-800">📐 调整大小：</strong>选中模块后拖拽边缘的蓝色手柄</div>
+        <div><strong class="text-gray-800">📄 多页面：</strong>点击左侧「+」新建页面，按钮可设置跳转到其他页面</div>
+        <div><strong class="text-gray-800">👁️ 预览：</strong>点击顶部「预览」查看真实网页效果</div>
+        <div><strong class="text-gray-800">💾 保存 / 导出：</strong>项目保存在浏览器本地；导出可下载独立HTML文件</div>
+        <div><strong class="text-gray-800">⌨️ 快捷键：</strong>Ctrl+Z 撤销 · Ctrl+Shift+Z 重做 · Ctrl+S 保存 · Delete 删除选中模块</div>
+      </div>
+      <button id="help-close" class="mt-4 w-full py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">知道了</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
