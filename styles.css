@@ -96,6 +96,12 @@ body {
 .prop-group input[type="color"] { height: 34px; padding: 2px; cursor: pointer; }
 .prop-row { display: flex; gap: 8px; }
 .prop-row > * { flex: 1; }
+.prop-btn {
+  padding: 6px 10px; font-size: 12px; border: 1px solid #e5e7eb;
+  background: #fff; color: #374151; border-radius: 6px; cursor: pointer;
+  transition: all .12s;
+}
+.prop-btn:hover { background: #3b82f6; color: #fff; border-color: #3b82f6; }
 
 /* ==================== 画布 ==================== */
 /* —— 网格背景 —— */
@@ -141,6 +147,14 @@ body {
   box-shadow: 0 0 0 1px rgba(59,130,246,.2);
 }
 .canvas-el.selected .resize-handle { display: block; }
+
+/* 多选：除主选中外的次选中元素，使用虚线边框 */
+.canvas-el.selected:not(.main-selected) {
+  border-style: dashed;
+  border-color: #60a5fa;
+  box-shadow: 0 0 0 1px rgba(96,165,250,.15);
+}
+.canvas-el.selected:not(.main-selected) .resize-handle { display: none; }
 
 /* 预览模式下隐藏选中态及手柄 */
 .preview-mode .canvas-el { cursor: default; border-color: transparent !important; }
