@@ -94,16 +94,44 @@
         <p class="text-[10px] text-gray-400 mt-2 leading-tight">💡 点击即可应用到当前页（覆盖现有内容，可撤销）</p>
       </div>
 
-      <!-- AI 面板（占位） -->
+      <!-- AI 面板 -->
       <div class="panel-section border-b border-gray-100 tab-panel hidden" data-tab-panel="ai">
         <h3>🤖 AI 生成</h3>
-        <div class="ai-panel-placeholder">
-          <div class="text-center py-8 px-3">
-            <div class="text-4xl mb-2">✨</div>
-            <p class="text-sm text-gray-600 mb-1">AI 一句话生成页面</p>
-            <p class="text-xs text-gray-400">敬请期待 · 下一版本上线</p>
-          </div>
+
+        <!-- Provider 选择 -->
+        <div class="ai-field">
+          <label>服务商</label>
+          <select id="ai-provider" class="ai-select">
+            <option value="deepseek">DeepSeek</option>
+            <option value="openai">OpenAI</option>
+          </select>
         </div>
+
+        <!-- API Key -->
+        <div class="ai-field">
+          <label>API Key</label>
+          <input id="ai-api-key" type="password" class="ai-input" placeholder="sk-..." autocomplete="off">
+          <div class="ai-key-actions">
+            <button id="ai-save-key" class="ai-mini-btn">保存</button>
+            <button id="ai-clear-key" class="ai-mini-btn">清除</button>
+          </div>
+          <p class="ai-hint">🔑 Key 仅存在本地 localStorage，不会上传</p>
+        </div>
+
+        <!-- Prompt -->
+        <div class="ai-field">
+          <label>描述你想要的页面</label>
+          <textarea id="ai-prompt" class="ai-textarea" rows="4" placeholder="例：做一个咖啡店首页，要有头图、菜单、营业时间"></textarea>
+        </div>
+
+        <!-- 生成按钮 -->
+        <button id="ai-generate-btn" class="ai-generate-btn">
+          <span id="ai-generate-text">✨ 生成页面</span>
+          <span id="ai-generate-spinner" class="ai-spinner hidden"></span>
+        </button>
+
+        <!-- 状态/错误 -->
+        <div id="ai-status" class="ai-status hidden"></div>
       </div>
 
       <!-- 页面管理 -->

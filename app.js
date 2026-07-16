@@ -1559,6 +1559,7 @@ function downloadHTML() {
 // ==================== 15. 保存 / 加载 (localStorage) ====================
 
 var STORAGE_KEY = 'puzzle_builder_project';
+var AI_CONFIG_KEY = 'puzzle_builder_ai_config';
 
 function saveProject(silent) {
   try {
@@ -1591,7 +1592,287 @@ function loadProject() {
   }
 }
 
-// ==================== 16. 全局渲染入口 ====================
+// ==================== 15b. AI 生成 (localStorage 配置 + 调用 + 解析) ====================
+
+var AI_PROVIDERS = {
+  deepseek: {
+    name: 'DeepSeek',
+    baseURL: 'https://api.deepseek.com',
+    model: 'deepseek-chat'
+  },
+  openai: {
+    name: 'OpenAI',
+    baseURL: 'https://api.openai.com',
+    model: 'gpt-4o-mini'
+  }
+};
+
+var AI_SYSTEM_PROMPT = [
+  '你是一个网页布局生成器。根据用户的需求，返回一个 JSON 对象，包含 elements 数组。',
+  '画布宽度 1200px，元素使用绝对定位 (x, y, width, height)。',
+  '元素格式（每个对象必须包含的字段）：',
+  '{ "id": "gen_1", "type": "text|image|video|button|card", "x": 数字, "y": 数字, "width": 数字, "height": 数字, ...类型特定属性 }',
+  '类型特定属性：',
+  '- text: content(string, 支持简单 HTML 如 <h1>/<p>/<strong>), bgColor, color, fontSize, textAlign(left/center/right), padding',
+  '- image: src(图片URL, 不存在就用 https://picsum.photos/seed/xxx/W/H), alt, radius(圆角), objectFit(cover/contain/fill)',
+  '- video: src, placeholder',
+  '- button: text, bgColor, textColor, fontSize, radius, bold(boolean)',
+  '- card: imageSrc, title, desc, bgColor, radius',
+  '要求：',
+  '1. 生成 4-8 个元素，构成一个完整的页面。',
+  '2. 元素之间不要重叠（用 y 坐标错开）。',
+  '3. x/y 从 40 开始，宽度不超过 1120，留 40px 边距。',
+  '4. 响应必须是合法 JSON 对象：{"elements": [...]}',
+  '5. content / title / desc 内容要具体符合用户需求（中文），不要写占位符 "Lorem ipsum"。'
+].join('\n');
+
+function loadAIConfig() {
+  try {
+    var raw = localStorage.getItem(AI_CONFIG_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+
+function saveAIConfig(config) {
+  try {
+    localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(config));
+  } catch (e) {
+    showToast('保存 API 配置失败：' + e.message);
+  }
+}
+
+function clearAIConfig() {
+  localStorage.removeItem(AI_CONFIG_KEY);
+}
+
+/**
+ * 调用 AI 生成页面元素
+ * @param {string} prompt 用户描述
+ * @param {string} apiKey
+ * @param {string} provider 'deepseek' | 'openai'
+ * @returns {Promise<Array>} 元素数组
+ */
+function callAIGenerator(prompt, apiKey, provider) {
+  var cfg = AI_PROVIDERS[provider] || AI_PROVIDERS.deepseek;
+  var url = cfg.baseURL + '/v1/chat/completions';
+
+  return fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + apiKey
+    },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: [
+        { role: 'system', content: AI_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      response_format: { type: 'json_object' },
+      temperature: 0.7
+    })
+  }).then(function(res) {
+    if (!res.ok) {
+      return res.text().then(function(txt) {
+        throw new Error('HTTP ' + res.status + ': ' + txt.slice(0, 200));
+      });
+    }
+    return res.json();
+  }).then(function(data) {
+    var content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+    if (!content) throw new Error('AI 返回为空');
+    var parsed = parseAIContent(content);
+    if (!parsed || !Array.isArray(parsed.elements)) {
+      throw new Error('AI 返回格式不正确，未找到 elements 数组');
+    }
+    return parsed.elements;
+  });
+}
+
+/** 解析 AI 返回的内容（兼容裸数组和 {elements: [...]} 两种） */
+function parseAIContent(content) {
+  var raw = content.trim();
+  // 有些模型即使指定 json_object 也会包 ```json
+  if (raw.indexOf('```') === 0) {
+    raw = raw.replace(/^```(?:json)?/i, '').replace(/```\s*$/, '').trim();
+  }
+  try {
+    var obj = JSON.parse(raw);
+    if (Array.isArray(obj)) return { elements: obj };
+    return obj;
+  } catch (e) {
+    // 兜底：从字符串里抠 JSON
+    var m = raw.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { return JSON.parse(m[0]); } catch (_) { return null; }
+    }
+    return null;
+  }
+}
+
+/** 把 AI 返回的元素对象标准化——补全字段、重生成 ID、clamp 边界 */
+function normalizeAIElements(rawElements) {
+  if (!Array.isArray(rawElements)) return [];
+  var CANVAS_W = 1200;
+  var result = [];
+  rawElements.forEach(function(el, idx) {
+    if (!el || typeof el !== 'object') return;
+    if (!el.type || ['text','image','video','button','card'].indexOf(el.type) === -1) return;
+    var clean = clone(el);
+    clean.id = uid();
+    // clamp 数值字段
+    ['x','y','width','height','fontSize','padding','radius'].forEach(function(k) {
+      if (clean[k] != null) {
+        var n = Number(clean[k]);
+        if (isNaN(n)) delete clean[k]; else clean[k] = Math.max(0, n);
+      }
+    });
+    // 边界保护
+    if (clean.x == null) clean.x = 40;
+    if (clean.y == null) clean.y = 40 + idx * 20;
+    if (clean.width == null) clean.width = 200;
+    if (clean.height == null) clean.height = 100;
+    if (clean.x + clean.width > CANVAS_W) clean.x = Math.max(0, CANVAS_W - clean.width);
+    if (clean.zIndex == null) clean.zIndex = 1;
+    result.push(clean);
+  });
+  return result;
+}
+
+/** 把 AI 生成的元素应用到当前页（覆盖） */
+function applyAIElementsToCurrentPage(elements) {
+  pushHistory();
+  currentPage().elements = elements;
+  clearSelection();
+  renderElements();
+  renderPropertyPanel();
+}
+
+/** 把 AI 生成的元素应用到新页面 */
+function applyAIElementsToNewPage(elements, pageName) {
+  pushHistory();
+  addPage();
+  if (pageName) {
+    currentPage().name = pageName;
+  }
+  currentPage().elements = elements;
+  clearSelection();
+  renderAll();
+}
+
+/** 弹窗：选覆盖当前页 / 新建页 */
+function showGenLocationDialog(elements, userPrompt) {
+  var overlay = document.createElement('div');
+  overlay.className = 'ai-dialog-overlay';
+  overlay.innerHTML =
+    '<div class="ai-dialog">' +
+      '<h4>✨ AI 已生成 ' + elements.length + ' 个模块</h4>' +
+      '<p>要应用到哪个页面？<br>' +
+        '<span style="color:#9ca3af;">当前页：' + escapeHtml(currentPage().name || '未命名') + '</span></p>' +
+      '<div class="ai-dialog-actions">' +
+        '<button data-act="cancel">取消</button>' +
+        '<button data-act="new">新建页面</button>' +
+        '<button data-act="overwrite" class="primary">覆盖当前页</button>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', function(e) {
+    var act = e.target.dataset.act;
+    if (act === 'overwrite') {
+      applyAIElementsToCurrentPage(elements);
+      showToast('已覆盖当前页（' + elements.length + ' 个模块）');
+      overlay.remove();
+    } else if (act === 'new') {
+      var name = userPrompt.slice(0, 12) || 'AI 生成页';
+      applyAIElementsToNewPage(elements, name);
+      showToast('已新建页面：' + name);
+      overlay.remove();
+    } else if (act === 'cancel' || e.target === overlay) {
+      overlay.remove();
+    }
+  });
+}
+
+/** 绑定 AI 面板交互 */
+function setupAIPanel() {
+  var providerSel = document.getElementById('ai-provider');
+  var apiKeyInput = document.getElementById('ai-api-key');
+  var promptInput = document.getElementById('ai-prompt');
+  var genBtn = document.getElementById('ai-generate-btn');
+  var genText = document.getElementById('ai-generate-text');
+  var genSpinner = document.getElementById('ai-generate-spinner');
+  var statusBox = document.getElementById('ai-status');
+
+  // 加载已保存配置
+  var saved = loadAIConfig();
+  if (saved) {
+    if (saved.apiKey) apiKeyInput.value = saved.apiKey;
+    if (saved.provider) providerSel.value = saved.provider;
+  }
+
+  function setAIStatus(text, type) {
+    if (!text) { statusBox.classList.add('hidden'); statusBox.textContent = ''; return; }
+    statusBox.classList.remove('hidden');
+    statusBox.textContent = text;
+    statusBox.className = 'ai-status ' + type;
+  }
+
+  function setGenerating(flag) {
+    genBtn.disabled = flag;
+    if (flag) {
+      genText.textContent = '生成中…';
+      genSpinner.classList.remove('hidden');
+    } else {
+      genText.textContent = '✨ 生成页面';
+      genSpinner.classList.add('hidden');
+    }
+  }
+
+  document.getElementById('ai-save-key').addEventListener('click', function() {
+    var cfg = { apiKey: apiKeyInput.value.trim(), provider: providerSel.value };
+    if (!cfg.apiKey) { showToast('请先填入 API Key'); return; }
+    saveAIConfig(cfg);
+    showToast('API 配置已保存到本地');
+  });
+
+  document.getElementById('ai-clear-key').addEventListener('click', function() {
+    apiKeyInput.value = '';
+    clearAIConfig();
+    showToast('已清除本地 API 配置');
+  });
+
+  genBtn.addEventListener('click', function() {
+    var apiKey = apiKeyInput.value.trim();
+    var provider = providerSel.value;
+    var prompt = promptInput.value.trim();
+
+    if (!apiKey) { setAIStatus('请先填入 API Key', 'error'); return; }
+    if (!prompt) { setAIStatus('请描述你想生成的页面', 'error'); return; }
+
+    setGenerating(true);
+    setAIStatus('正在调用 ' + (AI_PROVIDERS[provider] || {}).name + '…', 'info');
+
+    callAIGenerator(prompt, apiKey, provider).then(function(elements) {
+      var normalized = normalizeAIElements(elements);
+      if (normalized.length === 0) {
+        setGenerating(false);
+        setAIStatus('AI 未返回有效元素，请换一种描述试试', 'error');
+        return;
+      }
+      setGenerating(false);
+      setAIStatus('已生成 ' + normalized.length + ' 个模块', 'success');
+      showGenLocationDialog(normalized, prompt);
+    }).catch(function(err) {
+      setGenerating(false);
+      var msg = String(err.message || err).slice(0, 300);
+      setAIStatus('生成失败：' + msg, 'error');
+    });
+  });
+}
+
+// ==================== 15c. 全局渲染入口 ====================
 
 function renderAll() {
   renderPageList();
@@ -1634,6 +1915,8 @@ function init() {
   // 布局模板库
   setupSidebarTabs();
   setupTemplateLibrary();
+  // AI 面板
+  setupAIPanel();
   // 组件选择弹窗
   setupPicker();
   // 画布交互
