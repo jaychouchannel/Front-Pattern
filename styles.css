@@ -45,6 +45,50 @@ body {
 }
 .template-item .icon { font-size: 22px; line-height: 1; }
 
+/* —— 侧边栏 Tab 切换 —— */
+.sidebar-tabs {
+  display: flex; border-bottom: 1px solid #e5e7eb;
+  background: #f9fafb;
+}
+.sidebar-tab {
+  flex: 1; padding: 8px 0; border: none; background: transparent;
+  font-size: 12px; font-weight: 500; color: #6b7280;
+  cursor: pointer; transition: all .12s;
+  border-bottom: 2px solid transparent;
+}
+.sidebar-tab:hover { background: #f3f4f6; color: #1f2937; }
+.sidebar-tab.active {
+  color: #2563eb; background: #fff;
+  border-bottom-color: #2563eb; font-weight: 600;
+}
+
+/* —— 布局模板库 —— */
+.template-library {
+  display: flex; flex-direction: column; gap: 8px;
+  max-height: 360px; overflow-y: auto;
+}
+.tpl-card {
+  padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 8px;
+  cursor: pointer; transition: all .15s; background: #fff;
+  display: flex; align-items: center; gap: 10px;
+}
+.tpl-card:hover {
+  border-color: #3b82f6; background: #eff6ff;
+  transform: translateY(-1px); box-shadow: 0 2px 8px rgba(59,130,246,.15);
+}
+.tpl-thumb {
+  font-size: 22px; line-height: 1;
+  width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;
+  background: #f3f4f6; border-radius: 6px; flex-shrink: 0;
+}
+.tpl-name { font-size: 12px; font-weight: 600; color: #1f2937; margin-bottom: 2px; }
+.tpl-desc { font-size: 10px; color: #9ca3af; line-height: 1.3; }
+
+/* —— AI 占位面板 —— */
+.ai-panel-placeholder {
+  border: 1px dashed #d1d5db; border-radius: 8px; background: #fafafa;
+}
+
 /* —— 页面列表 —— */
 .page-list { max-height: 260px; overflow-y: auto; }
 .page-item {

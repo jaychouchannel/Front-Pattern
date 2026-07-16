@@ -67,8 +67,15 @@
 
     <!-- ========== 左侧面板 ========== -->
     <aside id="left-panel" class="left-panel">
+      <!-- Tab 切换 -->
+      <div id="sidebar-tabs" class="sidebar-tabs">
+        <button class="sidebar-tab active" data-tab="components">组件</button>
+        <button class="sidebar-tab" data-tab="templates">模板</button>
+        <button class="sidebar-tab" data-tab="ai">AI</button>
+      </div>
+
       <!-- 组件模板 -->
-      <div class="panel-section border-b border-gray-100">
+      <div class="panel-section border-b border-gray-100 tab-panel" data-tab-panel="components">
         <h3>📦 组件模板</h3>
         <div class="template-grid">
           <div class="template-item" data-type="text"><span class="icon">📝</span>文本</div>
@@ -78,6 +85,25 @@
           <div class="template-item" data-type="card"><span class="icon">📇</span>卡片</div>
         </div>
         <p class="text-[10px] text-gray-400 mt-2 leading-tight">💡 点击模板添加模块，或在画布上拖拽框选创建</p>
+      </div>
+
+      <!-- 布局模板库 -->
+      <div class="panel-section border-b border-gray-100 tab-panel hidden" data-tab-panel="templates">
+        <h3>🎨 布局模板</h3>
+        <div id="template-library" class="template-library"></div>
+        <p class="text-[10px] text-gray-400 mt-2 leading-tight">💡 点击即可应用到当前页（覆盖现有内容，可撤销）</p>
+      </div>
+
+      <!-- AI 面板（占位） -->
+      <div class="panel-section border-b border-gray-100 tab-panel hidden" data-tab-panel="ai">
+        <h3>🤖 AI 生成</h3>
+        <div class="ai-panel-placeholder">
+          <div class="text-center py-8 px-3">
+            <div class="text-4xl mb-2">✨</div>
+            <p class="text-sm text-gray-600 mb-1">AI 一句话生成页面</p>
+            <p class="text-xs text-gray-400">敬请期待 · 下一版本上线</p>
+          </div>
+        </div>
       </div>
 
       <!-- 页面管理 -->
@@ -171,6 +197,7 @@
   </div>
 </div>
 
+<script src="templates.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
