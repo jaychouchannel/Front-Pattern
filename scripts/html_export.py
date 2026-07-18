@@ -9,16 +9,24 @@ from __future__ import annotations
 
 import html
 import json
+import re
 from typing import Any
 
 
+_ALIGN_VALUES = frozenset({"left", "center", "right", "justify"})
+_OBJECT_FIT_VALUES = frozenset({"cover", "contain", "fill", "none", "scale-down"})
+# 颜色：#rgb / #rrggbb / #rrggbbaa / 命名色 / rgb()/rgba() 仅允许安全字符
+_COLOR_RE = re.compile(r"^[#a-zA-Z0-9(),\s.]+$")
+_NAMED_OR_HEX_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|rgba?\([^;{}<>]*\))$")
+# URL 协议白名单：防止 javascript:/data: 等
+_URL_RE = re.compile(r"^(https?:|//|/|\.+/|mailto:|tel:|data:image/)", re.IGNORECASE)
+
+
 def _esc_attr(s: Any) -> str:
-    """转义属性值里的双引号和 &，防止 attribute 注入。"""
+    """转义属性值里的特殊字符，防止 attribute 注入。"""
     if s is None:
         return ""
-    return (str(s)
-            .replace("&", "&")
-            .replace('"', "&quot;"))
+    return html.escape(str(s), quote=True)
 
 
 def _esc_text(s: Any) -> str:
@@ -28,31 +36,105 @@ def _esc_text(s: Any) -> str:
     return html.escape(str(s), quote=True)
 
 
+def _safe_enum(val: Any, allowed: frozenset[str], default: str) -> str:
+    """枚举白名单校验，非法值回退到默认。"""
+    if val is None:
+        return default
+    s = str(val).strip().lower()
+    return s if s in allowed else default
+
+
+def _safe_color(val: Any, default: str) -> str:
+    """颜色字段白名单校验：拒绝含 ; {} <> 等可破坏 CSS 的字符。"""
+    if val is None:
+        return default
+    s = str(val).strip()
+    if not s or not _NAMED_OR_HEX_RE.match(s):
+        return default
+    # 兜底：若混入 ;{} 之类字符仍拒绝
+    if not _COLOR_RE.match(s):
+        return default
+    return s
+
+
+def _safe_url(val: Any) -> str:
+    """URL 协议白名单。非法协议回退到空字符串（让上游走 placeholder 逻辑）。"""
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s:
+        return ""
+    if _URL_RE.match(s):
+        return s
+    return ""
+
+
+_ALLOWED_TAGS = frozenset({"h1", "h2", "h3", "h4", "p", "strong", "em", "b", "i",
+                           "br", "ul", "ol", "li", "span", "a"})
+_TAG_RE = re.compile(r"</?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>")
+_ATTR_RE = re.compile(r"\s([a-zA-Z-]+)\s*=\s*([\"\']).*?\2")
+
+
+def _sanitize_html(s: str) -> str:
+    """极简 HTML 白名单：保留 system prompt 允许的简单 tag，剥掉属性和未知 tag。
+
+    与 system prompt 给 LLM 的承诺一致：content 支持 <h1>/<p>/<strong> 等简单 HTML。
+    其他 tag（如 <script>、<iframe>、<img onerror=...>）以及所有属性都丢弃。
+    """
+    if not s:
+        return ""
+
+    def _replace(m: re.Match) -> str:
+        tag = m.group(1).lower()
+        whole = m.group(0)
+        if tag not in _ALLOWED_TAGS:
+            return ""
+        # 闭合标签 </tag> 先处理（不带属性）
+        if whole.startswith("</"):
+            return f"</{tag}>"
+        # 自闭合 <br> / <br/>
+        if tag == "br":
+            return "<br>"
+        # <a> 例外：保留 href
+        if tag == "a":
+            attrs = re.search(r"href\s*=\s*([\"\'])(.*?)\1", whole)
+            href = attrs.group(2) if attrs else ""
+            if not _URL_RE.match(href):
+                return ""
+            return f'<a href="{html.escape(href, quote=True)}">'
+        # 其他 tag：剥光所有属性
+        return f"<{tag}>"
+
+    return _TAG_RE.sub(_replace, s)
+
+
 def export_element_html(el: dict) -> str:
     """与 app.js exportElementHTML 对齐。"""
     el_type = el.get("type")
     if el_type == "text":
         padding = el.get("padding", 12)
-        text_align = el.get("textAlign", "left")
+        text_align = _safe_enum(el.get("textAlign"), _ALIGN_VALUES, "left")
         font_size = el.get("fontSize", 15)
-        color = el.get("color", "#1f2937")
-        content = el.get("content", "")
+        color = _safe_color(el.get("color"), "#1f2937")
+        content = _sanitize_html(el.get("content", ""))
         return (
             f'<div class="el-text" style="padding:{padding}px;text-align:{text_align};'
             f'font-size:{font_size}px;color:{color}">{content}</div>'
         )
 
     if el_type == "image":
-        src = el.get("src", "")
+        src = _safe_url(el.get("src", ""))
         alt = el.get("alt", "")
-        object_fit = el.get("objectFit", "cover")
+        object_fit = _safe_enum(el.get("objectFit"), _OBJECT_FIT_VALUES, "cover")
+        if not src:
+            return '<div class="el-image"></div>'
         return (
             f'<div class="el-image"><img src="{_esc_attr(src)}" alt="{_esc_attr(alt)}" '
             f'style="object-fit:{object_fit}"></div>'
         )
 
     if el_type == "video":
-        src = el.get("src", "")
+        src = _safe_url(el.get("src", ""))
         if not src:
             return ""
         is_embed = ("youtube" in src) or ("bilibili" in src)
@@ -61,9 +143,9 @@ def export_element_html(el: dict) -> str:
         return f'<div class="el-video"><video src="{_esc_attr(src)}" controls></video></div>'
 
     if el_type == "button":
-        text = el.get("text", "按钮")
-        bg = el.get("bgColor", "#3b82f6")
-        color = el.get("textColor", "#fff")
+        text = _esc_text(el.get("text", "按钮"))
+        bg = _safe_color(el.get("bgColor"), "#3b82f6")
+        color = _safe_color(el.get("textColor"), "#fff")
         font_size = el.get("fontSize", 15)
         radius = el.get("radius", 8)
         bold = "font-weight:600;" if el.get("bold") else ""
@@ -80,17 +162,19 @@ def export_element_html(el: dict) -> str:
         )
 
     if el_type == "card":
-        image_src = el.get("imageSrc")
-        bg = el.get("bgColor", "#fff")
+        image_src = _safe_url(el.get("imageSrc"))
+        bg = _safe_color(el.get("bgColor"), "#fff")
         radius = el.get("radius", 8)
         img_html = (
             f'<img src="{_esc_attr(image_src)}">' if image_src else "🖼"
         )
+        title = _esc_text(el.get("title", "标题"))
+        desc = _esc_text(el.get("desc", ""))
         return (
             f'<div class="el-card" style="background:{bg};border-radius:{radius}px">'
             f'<div class="card-img">{img_html}</div>'
-            f'<div class="card-body"><div class="card-title">{el.get("title", "标题")}</div>'
-            f'<div class="card-desc">{el.get("desc", "")}</div></div></div>'
+            f'<div class="card-body"><div class="card-title">{title}</div>'
+            f'<div class="card-desc">{desc}</div></div></div>'
         )
 
     return ""
@@ -171,8 +255,11 @@ def _render_page_els(elements: list[dict]) -> str:
             f"width:{el.get('width', 0)}px;height:{el.get('height', 0)}px;"
             f"z-index:{el.get('zIndex', 0)};"
         )
-        if el.get("bgColor"):
-            style += f"background:{el['bgColor']};"
+        bg = el.get("bgColor")
+        if bg:
+            safe_bg = _safe_color(bg, "")
+            if safe_bg:
+                style += f"background:{safe_bg};"
         if el.get("radius"):
             style += f"border-radius:{el['radius']}px;"
         inner = export_element_html(el)

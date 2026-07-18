@@ -19,6 +19,15 @@ import argparse
 import os
 import sys
 
+# Windows 终端默认编码常是 CP936，输出中文到 stdout/stderr 会触发 UnicodeEncodeError。
+# 强制 UTF-8，让 print 中文不崩。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8")
+        except (ValueError, TypeError):
+            pass
+
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _THIS_DIR)
 
@@ -27,10 +36,14 @@ from ai_client import (
     AIGeneratorError,
     call_ai_generator,
     fake_call_ai_generator,
+    load_dotenv,
     safe_filename,
 )
 from normalize import normalize_elements
 from html_export import write_html_file, write_json_file
+
+# 启动时自动加载项目根目录下的 .env（若存在），不覆盖已存在的环境变量。
+load_dotenv()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

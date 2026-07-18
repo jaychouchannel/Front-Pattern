@@ -10,11 +10,65 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Iterable
 import urllib.error
 import urllib.request
+
+
+_PROJECT_ROOT: Path | None = None
+
+
+def _find_project_root() -> Path:
+    """从 ai_client.py 往上找项目根目录（包含 .git 或 README.md）。"""
+    global _PROJECT_ROOT
+    if _PROJECT_ROOT is not None:
+        return _PROJECT_ROOT
+    candidate = Path(__file__).resolve().parent.parent
+    for marker in (candidate / ".git", candidate / "README.md", candidate / "index.html"):
+        if marker.exists():
+            _PROJECT_ROOT = candidate
+            return candidate
+    # fallback: 用 ai_client.py 所在目录的父目录
+    _PROJECT_ROOT = candidate
+    return candidate
+
+
+def load_dotenv(path: str | Path | None = None) -> bool:
+    """零依赖 .env 加载器。扫描 path（默认项目根目录下的 .env）并设置 os.environ。
+
+    支持：
+    - KEY=VALUE（注意：VALUE 前后引号会被剥掉）
+    - # 行注释
+    - 空行跳过
+    不支持的（也是 python-dotenv 不支持或不推荐的场景，此处保持一致）：
+    - export 前缀
+    - 行内注释
+    - 变量引用 ${VAR}
+    """
+    if path is None:
+        path = _find_project_root() / ".env"
+    p = Path(path)
+    if not p.exists():
+        return False
+    loaded = 0
+    for line in p.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, val = stripped.partition("=")
+        key = key.strip()
+        if not key:
+            continue
+        val = val.strip().strip("\"'")
+        os.environ.setdefault(key, val)
+        loaded += 1
+    return loaded > 0
 
 AI_PROVIDERS = {
     "deepseek": {
