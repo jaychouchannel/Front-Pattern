@@ -23,7 +23,7 @@ front-pattern/
 │   ├── generate.py        单 prompt 生成 CLI
 │   └── run_all.py         批量工作流入口
 ├── prompts/               输入：放 *.txt prompt 文件（已带 3 个示例）
-├── output/                输出：生成的 .json + .html（git 跟踪示例，跑产物保留本地）
+├── output/                输出：生成的 .json + .html（目录由 .gitkeep 占位，实际产物被 .gitignore 忽略，仅本地保存）
 ├── .env.example           API key 配置模板
 └── requirements.txt       依赖声明（实际上零依赖）
 ```
@@ -54,6 +54,8 @@ output/简单落地页.html
 cp .env.example .env
 # 编辑 .env: DEEPSEEK_API_KEY=sk-xxxx
 ```
+
+`generate.py` / `run_all.py` 启动时会**自动加载**项目根目录下的 `.env`（零依赖内置实现，不强制安装 `python-dotenv`）。已存在的环境变量不会被覆盖——命令行 `--api-key` 或 `export` 优先级更高。
 
 或者直接用环境变量 / 命令行参数：
 
@@ -157,8 +159,11 @@ A：浏览器适合单 prompt 交互式尝试；批量（10+ 个 prompt） apari
 离线脚本化用 Python CLI 更顺手，也避免 API key 留在浏览器 localStorage。
 
 **Q：要不要 `pip install`？**
-A：不需要。`requirements.txt` 只是声明，实际跑只用标准库。如果你想要自动加载 `.env` 文件，
-可可选安装 `python-dotenv`（脚本本身不强依赖）。
+A：不需要。`requirements.txt` 只是声明，实际跑只用标准库。
+脚本内置零依赖的 `.env` 加载器，自动读取项目根目录的 `.env` 文件。
+
+**Q：在 Windows 终端输出乱码怎么办？**
+A：脚本会自动将 stdout/stderr 设为 UTF-8 编码。如果终端仍然显示乱码，请在 PowerShell 中运行 `chcp 65001` 切换到 UTF-8 代码页后再执行 Python 脚本。
 
 **Q：输出的 HTML 跟编辑器导出的能混用吗？**
 A：可以。三者——浏览器实时预览、编辑器导出、Python 脚本生成——输出格式完全相同。
