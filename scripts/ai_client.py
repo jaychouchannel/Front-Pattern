@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -151,9 +152,49 @@ def parse_ai_content(content: str) -> dict | None:
     return obj
 
 
+def _classify_http_error(e: urllib.error.HTTPError) -> str:
+    """把 HTTPError 转成对用户友好的中文提示。
+
+    常见 4xx/5xx 都覆盖。snippet 仍然附上，便于排查网关/上游异常。
+    """
+    snippet = ""
+    try:
+        snippet = e.read().decode("utf-8", errors="replace")[:200]
+    except Exception:
+        pass
+    base = f"HTTP {e.code}"
+    hints = {
+        400: f"请求格式错误（{base}）",
+        401: f"API key 无效或过期（{base}）。请在 .env 设置 {('DEEPSEEK_API_KEY' if 'deepseek' in str(e.url) else 'OPENAI_API_KEY')} 或传 --api-key",
+        403: f"无权访问该模型/端点（{base}）。检查账号是否开通对应模型",
+        404: f"路径或模型不存在（{base}）。检查 --base-url / --model 是否拼错",
+        408: f"请求超时（{base}）",
+        413: f"prompt 过长（{base}）。请缩短描述",
+        429: f"速率限制或配额耗尽（{base}）。稍后重试或更换账号",
+    }
+    hint = hints.get(e.code)
+    if hint is None:
+        if 500 <= e.code < 600:
+            hint = f"上游服务异常（{base}）"
+        else:
+            hint = base
+    if snippet:
+        hint = f"{hint} | 响应片段: {snippet}"
+    return hint
+
+
+# 对 429 / 5xx 自动重试：第一次失败后等 2s 重试一次。再多反而不利于 quota。
+_RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+
 def call_ai_generator(prompt: str, cfg: ProviderConfig, *,
-                      temperature: float = 0.7, timeout: int = 60) -> list[dict]:
-    """调用 AI，返回解析后的 elements 数组（未做 normalize）。"""
+                      temperature: float = 0.7, timeout: int = 60,
+                      max_retries: int = 1) -> list[dict]:
+    """调用 AI，返回解析后的 elements 数组（未做 normalize）。
+
+    对 429 / 5xx 自动重试 max_retries 次（默认 1 次），间隔 2s。
+    其他错误（4xx 鉴权/格式）不重试，直接抛出。
+    """
     url = cfg.base_url.rstrip("/") + "/v1/chat/completions"
     payload = {
         "model": cfg.model,
@@ -165,27 +206,38 @@ def call_ai_generator(prompt: str, cfg: ProviderConfig, *,
         "temperature": temperature,
     }
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        method="POST",
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {cfg.api_key}",
-        },
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        snippet = ""
+
+    last_err: AIGeneratorError | None = None
+    for attempt in range(max_retries + 1):
+        req = urllib.request.Request(
+            url,
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {cfg.api_key}",
+            },
+        )
         try:
-            snippet = e.read().decode("utf-8", errors="replace")[:200]
-        except Exception:
-            pass
-        raise AIGeneratorError(f"HTTP {e.code}: {snippet}") from e
-    except urllib.error.URLError as e:
-        raise AIGeneratorError(f"网络错误: {e.reason}") from e
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            break  # 成功跳出
+        except urllib.error.HTTPError as e:
+            hint = _classify_http_error(e)
+            if e.code in _RETRY_STATUSES and attempt < max_retries:
+                last_err = AIGeneratorError(f"{hint}（第 {attempt+1} 次失败，2s 后重试）")
+                time.sleep(2)
+                continue
+            raise AIGeneratorError(hint) from e
+        except urllib.error.URLError as e:
+            if attempt < max_retries:
+                last_err = AIGeneratorError(f"网络错误: {e.reason}（第 {attempt+1} 次失败，2s 后重试）")
+                time.sleep(2)
+                continue
+            raise AIGeneratorError(f"网络错误: {e.reason}") from e
+    else:
+        # for...else 不会在 break 时执行；这里只是兜底
+        raise last_err or AIGeneratorError("未知错误")
 
     try:
         content = data["choices"][0]["message"]["content"]

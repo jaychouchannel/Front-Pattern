@@ -20,14 +20,8 @@ import os
 import sys
 from pathlib import Path
 
-# Windows 终端默认编码常是 CP936，输出中文到 stdout/stderr 会触发 UnicodeEncodeError。
-# 强制 UTF-8，让 print 中文不崩。
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        try:
-            _stream.reconfigure(encoding="utf-8")
-        except (ValueError, TypeError):
-            pass
+import cli_util
+cli_util.bootstrap()
 
 _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _THIS_DIR)
@@ -38,14 +32,10 @@ from ai_client import (
     AIGeneratorError,
     call_ai_generator,
     fake_call_ai_generator,
-    load_dotenv,
     safe_filename,
 )
 from normalize import normalize_elements
 from html_export import write_html_file, write_json_file
-
-# 启动时自动加载项目根目录下的 .env（若存在），不覆盖已存在的环境变量。
-load_dotenv()
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -73,15 +63,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def _parse_prompt_file(path: Path) -> tuple[str, str]:
-    """读 .txt，返回 (name, prompt)。第一行若是 `--name: xxx`，则抽出 name。"""
+    """读 .txt，返回 (name, prompt)。
+
+    支持的元指令（必须在第一行，与 --name 同样格式，按需多行）：
+      --name: xxx         页面名（用作输出文件名）
+      --min-n: 4           生成元素下界（覆写 system prompt 默认 4）
+      --max-n: 8           生成元素上界（覆写 system prompt 默认 8）
+
+    其余行作为 prompt 文本。
+    """
     text = path.read_text(encoding="utf-8")
     name = path.stem
-    body = text
     lines = text.splitlines()
-    if lines and lines[0].strip().startswith("--name:"):
-        name = lines[0].split(":", 1)[1].strip() or name
-        body = "\n".join(lines[1:]).strip()
-    return name, body.strip()
+
+    meta: dict[str, str] = {}
+    body_start = 0
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not s.startswith("--"):
+            break
+        if ":" not in s:
+            break
+        key, _, val = s.partition(":")
+        key = key[2:].strip().lower()  # strip leading "--"
+        if key in ("name", "min-n", "max-n"):
+            meta[key] = val.strip()
+            body_start = i + 1
+        else:
+            break  # 未知元指令不消费，按正文处理
+
+    name = meta.get("name") or name
+    body = "\n".join(lines[body_start:]).strip()
+
+    # 把 min/max-n 转成一句明确指令追加到 prompt 末尾，让 LLM 看见。
+    # 这样不依赖 system prompt 改写，对单 prompt 也生效。
+    extra_constraints: list[str] = []
+    if "min-n" in meta and meta["min-n"].isdigit():
+        extra_constraints.append(f"生成元素数量不得少于 {int(meta['min-n'])} 个")
+    if "max-n" in meta and meta["max-n"].isdigit():
+        extra_constraints.append(f"生成元素数量不得超过 {int(meta['max-n'])} 个")
+    if extra_constraints:
+        body = body + "\n\n(" + "；".join(extra_constraints) + "。)"
+    return name, body
 
 
 def _resolve_api_key(args: argparse.Namespace) -> str:
