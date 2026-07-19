@@ -22,6 +22,35 @@ _NAMED_OR_HEX_RE = re.compile(r"^(#[0-9a-fA-F]{3,8}|[a-zA-Z]+|rgba?\([^;{}<>]*\)
 _URL_RE = re.compile(r"^(https?:|//|/|\.+/|mailto:|tel:|data:image/)", re.IGNORECASE)
 
 
+def _safe_number(val: Any, default: float, *, lo: float = 0, hi: float | None = None) -> float:
+    """数字字段最后一道防线：转 float，NaN/非法值回落 default，再 clamp 到 [lo, hi]。
+
+    normalize.py 已经对主坐标字段 clamp 过，但 export_element_html 内还有
+    fontSize/padding/radius 等字段直接拼到 CSS。若上游跳过 normalize
+    或字段不在 normalize 白名单内（例如未来新增），这里仍能挡住
+    `font-size: NaNpx` / `font-size: 1e20px` 之类的输出。
+    """
+    try:
+        n = float(val)
+    except (TypeError, ValueError):
+        return default
+    if n != n or n in (float("inf"), float("-inf")):  # NaN / inf
+        return default
+    if n < lo:
+        return lo
+    if hi is not None and n > hi:
+        return hi
+    return n
+
+
+def _num_px(val: Any, default: float, *, lo: float = 0, hi: float | None = None) -> str:
+    """把数字字段格式化成 Npx 字符串（整数无小数尾巴，浮点保留必要精度）。"""
+    n = _safe_number(val, default, lo=lo, hi=hi)
+    if n == int(n):
+        return f"{int(n)}px"
+    return f"{n:g}px"
+
+
 def _esc_attr(s: Any) -> str:
     """转义属性值里的特殊字符，防止 attribute 注入。"""
     if s is None:
@@ -112,14 +141,14 @@ def export_element_html(el: dict) -> str:
     """与 app.js exportElementHTML 对齐。"""
     el_type = el.get("type")
     if el_type == "text":
-        padding = el.get("padding", 12)
+        padding = _num_px(el.get("padding", 12), 12, lo=0, hi=200)
         text_align = _safe_enum(el.get("textAlign"), _ALIGN_VALUES, "left")
-        font_size = el.get("fontSize", 15)
+        font_size = _num_px(el.get("fontSize", 15), 15, lo=1, hi=400)
         color = _safe_color(el.get("color"), "#1f2937")
         content = _sanitize_html(el.get("content", ""))
         return (
-            f'<div class="el-text" style="padding:{padding}px;text-align:{text_align};'
-            f'font-size:{font_size}px;color:{color}">{content}</div>'
+            f'<div class="el-text" style="padding:{padding};text-align:{text_align};'
+            f'font-size:{font_size};color:{color}">{content}</div>'
         )
 
     if el_type == "image":
@@ -146,8 +175,8 @@ def export_element_html(el: dict) -> str:
         text = _esc_text(el.get("text", "按钮"))
         bg = _safe_color(el.get("bgColor"), "#3b82f6")
         color = _safe_color(el.get("textColor"), "#fff")
-        font_size = el.get("fontSize", 15)
-        radius = el.get("radius", 8)
+        font_size = _num_px(el.get("fontSize", 15), 15, lo=1, hi=400)
+        radius = _num_px(el.get("radius", 8), 8, lo=0, hi=400)
         bold = "font-weight:600;" if el.get("bold") else ""
         link = el.get("link") or {}
         attr = ""
@@ -157,21 +186,21 @@ def export_element_html(el: dict) -> str:
             attr = f' data-link-url="{_esc_attr(link.get("target"))}"'
         return (
             f'<div class="el-button"><button style="background:{bg};color:{color};'
-            f'font-size:{font_size}px;border-radius:{radius}px;{bold}"{attr}>'
+            f'font-size:{font_size};border-radius:{radius};{bold}"{attr}>'
             f'{text}</button></div>'
         )
 
     if el_type == "card":
         image_src = _safe_url(el.get("imageSrc"))
         bg = _safe_color(el.get("bgColor"), "#fff")
-        radius = el.get("radius", 8)
+        radius = _num_px(el.get("radius", 8), 8, lo=0, hi=400)
         img_html = (
             f'<img src="{_esc_attr(image_src)}">' if image_src else "🖼"
         )
         title = _esc_text(el.get("title", "标题"))
         desc = _esc_text(el.get("desc", ""))
         return (
-            f'<div class="el-card" style="background:{bg};border-radius:{radius}px">'
+            f'<div class="el-card" style="background:{bg};border-radius:{radius}">'
             f'<div class="card-img">{img_html}</div>'
             f'<div class="card-body"><div class="card-title">{title}</div>'
             f'<div class="card-desc">{desc}</div></div></div>'
@@ -249,19 +278,19 @@ def _render_page_els(elements: list[dict]) -> str:
     sorted_els = sorted(elements, key=lambda e: e.get("zIndex", 0))
     lines: list[str] = []
     for el in sorted_els:
-        style = (
-            "position:absolute;"
-            f"left:{el.get('x', 0)}px;top:{el.get('y', 0)}px;"
-            f"width:{el.get('width', 0)}px;height:{el.get('height', 0)}px;"
-            f"z-index:{el.get('zIndex', 0)};"
-        )
+        style = "position:absolute;"
+        style += f"left:{_num_px(el.get('x', 0), 0)};"
+        style += f"top:{_num_px(el.get('y', 0), 0)};"
+        style += f"width:{_num_px(el.get('width', 0), 0, lo=1, hi=1200)};"
+        style += f"height:{_num_px(el.get('height', 0), 0, lo=1, hi=2000)};"
+        style += f"z-index:{el.get('zIndex', 0)};"
         bg = el.get("bgColor")
         if bg:
             safe_bg = _safe_color(bg, "")
             if safe_bg:
                 style += f"background:{safe_bg};"
         if el.get("radius"):
-            style += f"border-radius:{el['radius']}px;"
+            style += f"border-radius:{_num_px(el['radius'], 8, lo=0, hi=400)};"
         inner = export_element_html(el)
         lines.append(f'      <div style="{style}">{inner}</div>')
     return "\n".join(lines)
