@@ -97,11 +97,21 @@ def _parse_prompt_file(path: Path) -> tuple[str, str]:
 
     # 把 min/max-n 转成一句明确指令追加到 prompt 末尾，让 LLM 看见。
     # 这样不依赖 system prompt 改写，对单 prompt 也生效。
+    # 用 try/int 而非 str.isdigit()：isdigit() 接受全角/天城文等 Unicode 数字，
+    # 但 int() 解析不了，会抛 ValueError 整批崩溃。
+    def _safe_int(s: str) -> int | None:
+        try:
+            return int(s)
+        except (ValueError, TypeError):
+            return None
+
     extra_constraints: list[str] = []
-    if "min-n" in meta and meta["min-n"].isdigit():
-        extra_constraints.append(f"生成元素数量不得少于 {int(meta['min-n'])} 个")
-    if "max-n" in meta and meta["max-n"].isdigit():
-        extra_constraints.append(f"生成元素数量不得超过 {int(meta['max-n'])} 个")
+    mn = _safe_int(meta.get("min-n", ""))
+    if mn is not None:
+        extra_constraints.append(f"生成元素数量不得少于 {mn} 个")
+    mx = _safe_int(meta.get("max-n", ""))
+    if mx is not None:
+        extra_constraints.append(f"生成元素数量不得超过 {mx} 个")
     if extra_constraints:
         body = body + "\n\n(" + "；".join(extra_constraints) + "。)"
     return name, body

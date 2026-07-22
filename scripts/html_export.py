@@ -289,7 +289,7 @@ def _render_page_els(elements: list[dict]) -> str:
             safe_bg = _safe_color(bg, "")
             if safe_bg:
                 style += f"background:{safe_bg};"
-        if el.get("radius"):
+        if el.get("radius") is not None:
             style += f"border-radius:{_num_px(el['radius'], 8, lo=0, hi=400)};"
         inner = export_element_html(el)
         lines.append(f'      <div style="{style}">{inner}</div>')

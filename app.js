@@ -6,9 +6,13 @@
 
 // ==================== 1. 数据模型 & 状态管理 ====================
 
-/** 生成短唯一 ID */
+/** 生成短唯一 ID
+ *  Date.now() 同毫秒内多次调用返回相同值，且 Math.random 4 位 base36 命中空间约 1.67M，
+ *  50 个元素同步 paste 时冲突概率约 0.07%。加内存自增计数器避免同毫秒冲突。 */
+var _uidCounter = 0;
 function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  _uidCounter = (_uidCounter + 1) % 0x100000;
+  return Date.now().toString(36) + _uidCounter.toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 /** 默认编辑器状态 */
@@ -103,18 +107,20 @@ function showToast(msg, duration) {
 // ==================== 3. 历史记录（撤销/重做） ====================
 
 function pushHistory() {
-  // 快照保存所有多选相关字段
-  const snapshot = {
+  state.history.past.push(_makeSnapshot());
+  if (state.history.past.length > 50) state.history.past.shift();
+  state.history.future = [];
+  updateUndoRedoButtons();
+}
+
+function _makeSnapshot() {
+  return {
     pages: clone(state.pages),
     currentPageId: state.currentPageId,
     selectedElementId: state.selectedElementId,
     selectedElementIds: (state.selectedElementIds || []).slice(),
     _clipboard: state._clipboard
   };
-  state.history.past.push(snapshot);
-  if (state.history.past.length > 50) state.history.past.shift();
-  state.history.future = [];
-  updateUndoRedoButtons();
 }
 
 function restoreSnapshot(snap) {
@@ -128,11 +134,7 @@ function restoreSnapshot(snap) {
 function undo() {
   if (state.history.past.length === 0) return;
   // 当前状态进入 future
-  state.history.future.push({
-    pages: clone(state.pages),
-    currentPageId: state.currentPageId,
-    selectedElementId: state.selectedElementId
-  });
+  state.history.future.push(_makeSnapshot());
   const snap = state.history.past.pop();
   restoreSnapshot(snap);
   renderAll();
@@ -141,11 +143,7 @@ function undo() {
 
 function redo() {
   if (state.history.future.length === 0) return;
-  state.history.past.push({
-    pages: clone(state.pages),
-    currentPageId: state.currentPageId,
-    selectedElementId: state.selectedElementId
-  });
+  state.history.past.push(_makeSnapshot());
   const snap = state.history.future.pop();
   restoreSnapshot(snap);
   renderAll();
@@ -406,7 +404,7 @@ function elementStyles(el) {
   let s = 'left:' + el.x + 'px;top:' + el.y + 'px;';
   s += 'width:' + el.width + 'px;height:' + el.height + 'px;';
   if (el.bgColor) s += 'background:' + el.bgColor + ';';
-  if (el.radius) s += 'border-radius:' + el.radius + 'px;';
+  if (el.radius != null) s += 'border-radius:' + el.radius + 'px;';
   if (el.type === 'text' && el.color) s += 'color:' + el.color + ';';
   s += 'z-index:' + (el.zIndex||0) + ';';
   return s;
@@ -443,11 +441,11 @@ function elementInnerHTML(el) {
         }
       }
       var bold = el.bold ? 'font-weight:600;' : '';
-      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius||8) + 'px;' + bold + '"' + extra + '>' +
+      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius!=null?el.radius:8) + 'px;' + bold + '"' + extra + '>' +
              (el.text || '按钮') + '</button></div>';
 
     case 'card':
-      return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius||8) + 'px">' +
+      return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius!=null?el.radius:8) + 'px">' +
              '<div class="card-img">' +
              (el.imageSrc ? '<img src="' + el.imageSrc + '">' : '\uD83D\uDDBC') +
              '</div>' +
@@ -698,15 +696,18 @@ function makeResizable(div, el) {
         var dy = ev.clientY - startY;
         if (dir.includes('e')) { el.width = Math.max(40, orig.w + dx); }
         if (dir.includes('w')) {
-          var nw = Math.max(0, orig.x + dx);
-          el.width = Math.max(40, orig.w + (orig.x - nw));
-          el.x = nw;
+          // 先按原始 dx 算新 width 与新 x，再 clamp，避免先 clamp x 导致 width 反向增长
+          var newW = orig.w - dx;
+          if (newW < 40) { newW = 40; }
+          el.x = Math.max(0, orig.x + (orig.w - newW));
+          el.width = newW;
         }
         if (dir.includes('s')) { el.height = Math.max(30, orig.h + dy); }
         if (dir.includes('n')) {
-          var nh = Math.max(0, orig.y + dy);
-          el.height = Math.max(30, orig.h + (orig.y - nh));
-          el.y = nh;
+          var newH = orig.h - dy;
+          if (newH < 30) { newH = 30; }
+          el.y = Math.max(0, orig.y + (orig.h - newH));
+          el.height = newH;
         }
         div.style.cssText = elementStyles(el);
         renderPropertyPanel();
@@ -1417,7 +1418,7 @@ function exportHTML() {
         'width:' + el.width + 'px;height:' + el.height + 'px;' +
         'z-index:' + (el.zIndex||0) + ';';
       if (el.bgColor) style += 'background:' + el.bgColor + ';';
-      if (el.radius) style += 'border-radius:' + el.radius + 'px;';
+      if (el.radius != null) style += 'border-radius:' + el.radius + 'px;';
       var inner = exportElementHTML(el);
       return '<div style="' + style + '">' + inner + '</div>';
     }).join('\n      ');
@@ -1532,9 +1533,9 @@ function exportElementHTML(el) {
         else if (el.link.type === 'url') attr = ' data-link-url="' + el.link.target + '"';
       }
       var bold = el.bold ? 'font-weight:600;' : '';
-      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius||8) + 'px;' + bold + '"' + attr + '>' + (el.text||'按钮') + '</button></div>';
+      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius!=null?el.radius:8) + 'px;' + bold + '"' + attr + '>' + (el.text||'按钮') + '</button></div>';
     case 'card':
-      return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius||8) + 'px">' +
+      return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius!=null?el.radius:8) + 'px">' +
              '<div class="card-img">' + (el.imageSrc ? '<img src="' + el.imageSrc + '">' : '🖼') + '</div>' +
              '<div class="card-body"><div class="card-title">' + (el.title||'标题') + '</div>' +
              '<div class="card-desc">' + (el.desc||'') + '</div></div></div>';
