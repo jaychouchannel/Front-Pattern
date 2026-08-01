@@ -1422,8 +1422,7 @@ function exportHTML() {
       var inner = exportElementHTML(el);
       return '<div style="' + style + '">' + inner + '</div>';
     }).join('\n      ');
-    return '<div class="pb-page" data-page-id="' + page.id + '"' +
-           (page.id === state.currentPageId ? '' : ' style="display:none"') + '>' +
+    return '<div class="pb-page" data-page-id="' + page.id + '">' +
            '\n      ' + elsHTML +
            '\n    </div>';
   }).join('\n    ');
@@ -1438,9 +1437,10 @@ function exportHTML() {
 '<title>导出页面</title>\n' +
 '<style>\n' +
 '  * { box-sizing: border-box; margin: 0; padding: 0; }\n' +
-'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }\n' +
+'  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }\n' +
 '  .pb-stage { position: relative; width: 1200px; margin: 0 auto; min-height: 100vh; background: #fff; }\n' +
 '  .pb-page { position: relative; width: 100%; min-height: 100vh; }\n' +
+'  .js .pb-page { display: none; }\n' +
 '  /* 响应式：根据视口缩放 */\n' +
 '  @media (max-width: 1240px) { .pb-stage { transform-origin: top center; } }\n' +
 '  .el-text { padding: 12px 16px; font-size: 15px; color: #1f2937; line-height: 1.6; word-break: break-word; }\n' +
@@ -1461,10 +1461,11 @@ function exportHTML() {
 '  .el-card .card-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; color: #1f2937; }\n' +
 '  .el-card .card-desc { font-size: 12px; color: #6b7280; line-height: 1.4; }\n' +
 '  /* 响应式：手机端缩小画布以适应屏幕 */\n' +
-'  @media (max-width: 768px) { .pb-stage { width: 100vw; transform: scale(1); } }\n' +
+'  @media (max-width: 768px) { .pb-stage { width: 100vw; transform: scale(1); margin: 0; } }\n' +
 '</style>\n' +
 '</head>\n' +
 '<body>\n' +
+'  <script>document.documentElement.className += " js";</script>\n' +
 '  <div class="pb-stage" id="pb-stage">\n' +
 '    ' + pagesHTML + '\n' +
 '  </div>\n' +
@@ -1473,10 +1474,11 @@ function exportHTML() {
 '  function showPage() {\n' +
 '    var hash = location.hash.replace("#","");\n' +
 '    var pages = document.querySelectorAll(".pb-page");\n' +
-'    if (!hash) { pages[0].style.display = ""; return; }\n' +
-'    pages.forEach(function(p) {\n' +
-'      p.style.display = (p.dataset.pageId === hash) ? "" : "none";\n' +
-'    });\n' +
+'    pages.forEach(function(p) { p.style.display = "none"; });\n' +
+'    var target = null;\n' +
+'    if (hash) { target = document.querySelector(\'.pb-page[data-page-id="\' + hash + \'"]\'); }\n' +
+'    if (!target) { target = pages[0]; }   // 无 hash 或 hash 失效时回退到首页\n' +
+'    if (target) target.style.display = "";\n' +
 '  }\n' +
 '  // 按钮点击跳转\n' +
 '  document.addEventListener("click", function(e) {\n' +
@@ -1492,14 +1494,23 @@ function exportHTML() {
 '  function fitStage() {\n' +
 '    var stage = document.getElementById("pb-stage");\n' +
 '    var vw = window.innerWidth;\n' +
-'    if (vw < 1240) {\n' +
+'    if (vw < 768) {\n' +
+'      // 手机端：100vw 宽，不缩放\n' +
+'      stage.style.transform = "none";\n' +
+'      stage.style.transformOrigin = "";\n' +
+'      stage.style.marginLeft = "";\n' +
+'      document.body.style.height = "auto";\n' +
+'    } else if (vw < 1240) {\n' +
+'      // 平板/小桌面：按比例缩放，transform-origin top center\n' +
 '      var scale = vw / 1240;\n' +
 '      stage.style.transform = "scale(" + scale + ")";\n' +
-'      stage.style.transformOrigin = "top left";\n' +
-'      stage.style.marginLeft = "0";\n' +
+'      stage.style.transformOrigin = "top center";\n' +
+'      stage.style.marginLeft = "auto";\n' +
 '      document.body.style.height = (stage.offsetHeight * scale) + "px";\n' +
 '    } else {\n' +
 '      stage.style.transform = "none";\n' +
+'      stage.style.transformOrigin = "";\n' +
+'      stage.style.marginLeft = "";\n' +
 '      document.body.style.height = "auto";\n' +
 '    }\n' +
 '  }\n' +

@@ -210,9 +210,10 @@ def export_element_html(el: dict) -> str:
 
 
 _STYLE_CSS = """  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
   .pb-stage { position: relative; width: 1200px; margin: 0 auto; min-height: 100vh; background: #fff; }
   .pb-page { position: relative; width: 100%; min-height: 100vh; }
+  .js .pb-page { display: none; }
   /* 响应式：根据视口缩放 */
   @media (max-width: 1240px) { .pb-stage { transform-origin: top center; } }
   .el-text { padding: 12px 16px; font-size: 15px; color: #1f2937; line-height: 1.6; word-break: break-word; }
@@ -233,16 +234,17 @@ _STYLE_CSS = """  * { box-sizing: border-box; margin: 0; padding: 0; }
   .el-card .card-title { font-weight: 600; font-size: 15px; margin-bottom: 4px; color: #1f2937; }
   .el-card .card-desc { font-size: 12px; color: #6b7280; line-height: 1.4; }
   /* 响应式：手机端缩小画布以适应屏幕 */
-  @media (max-width: 768px) { .pb-stage { width: 100vw; transform: scale(1); } }"""
+  @media (max-width: 768px) { .pb-stage { width: 100vw; transform: scale(1); margin: 0; } }"""
 
 _SCRIPT_JS = """  // 简单的页面切换：监听 hash 变化
   function showPage() {
     var hash = location.hash.replace("#","");
     var pages = document.querySelectorAll(".pb-page");
-    if (!hash) { pages[0].style.display = ""; return; }
-    pages.forEach(function(p) {
-      p.style.display = (p.dataset.pageId === hash) ? "" : "none";
-    });
+    pages.forEach(function(p) { p.style.display = "none"; });
+    var target = null;
+    if (hash) { target = document.querySelector('.pb-page[data-page-id="' + hash + '"]'); }
+    if (!target) { target = pages[0]; }   // 无 hash 或 hash 失效时回退到首页
+    if (target) target.style.display = "";
   }
   // 按钮点击跳转
   document.addEventListener("click", function(e) {
@@ -258,14 +260,23 @@ _SCRIPT_JS = """  // 简单的页面切换：监听 hash 变化
   function fitStage() {
     var stage = document.getElementById("pb-stage");
     var vw = window.innerWidth;
-    if (vw < 1240) {
+    if (vw < 768) {
+      // 手机端：100vw 宽，不缩放
+      stage.style.transform = "none";
+      stage.style.transformOrigin = "";
+      stage.style.marginLeft = "";
+      document.body.style.height = "auto";
+    } else if (vw < 1240) {
+      // 平板/小桌面：按比例缩放，transform-origin top center
       var scale = vw / 1240;
       stage.style.transform = "scale(" + scale + ")";
-      stage.style.transformOrigin = "top left";
-      stage.style.marginLeft = "0";
+      stage.style.transformOrigin = "top center";
+      stage.style.marginLeft = "auto";
       document.body.style.height = (stage.offsetHeight * scale) + "px";
     } else {
       stage.style.transform = "none";
+      stage.style.transformOrigin = "";
+      stage.style.marginLeft = "";
       document.body.style.height = "auto";
     }
   }
@@ -300,14 +311,15 @@ def export_html(pages: list[dict[str, Any]], *, current_page_id: str | None = No
     """与 app.js exportHTML 完全一致。
 
     pages: [{"id": "page_1", "name": "首页", "elements": [...]}]
-    current_page_id: 切换页面时控制初始可见性（与前端 currentPageId 等价）
+    current_page_id: 保留参数，向后兼容；导出时所有页面均隐藏，由 JS showPage() 决定首屏可见。
     """
     pages_html_parts: list[str] = []
     for page in pages:
         els_html = _render_page_els(page.get("elements", []))
-        hidden_style = "" if page["id"] == current_page_id else ' style="display:none"'
+        # 所有页面默认隐藏（CSS `.pb-page { display:none }`），由 showPage() 决定首屏可见。
+        # 避免 FOUC：不依赖"当前编辑页"，分享链接总是落到首页（或 hash 指定的页）。
         pages_html_parts.append(
-            f'    <div class="pb-page" data-page-id="{_esc_attr(page["id"])}"{hidden_style}">\n'
+            f'    <div class="pb-page" data-page-id="{_esc_attr(page["id"])}">\n'
             f'      {els_html}\n'
             f'    </div>'
         )
@@ -325,6 +337,7 @@ def export_html(pages: list[dict[str, Any]], *, current_page_id: str | None = No
         "</style>\n"
         "</head>\n"
         "<body>\n"
+        '  <script>document.documentElement.className += " js";</script>\n'
         '  <div class="pb-stage" id="pb-stage">\n'
         f"{pages_html}\n"
         "  </div>\n"
