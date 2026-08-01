@@ -27,6 +27,7 @@ sys.path.insert(0, _THIS_DIR)
 
 from ai_client import (
     ProviderConfig,
+    AIResponse,
     AIGeneratorError,
     call_ai_generator,
     fake_call_ai_generator,
@@ -90,13 +91,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[1/3] {'dry-run' if args.dry_run else cfg.model} 正在生成: {name}")
     try:
         if args.dry_run:
-            raw_elements = fake_call_ai_generator(args.prompt, cfg)
+            resp = fake_call_ai_generator(args.prompt, cfg)
         else:
-            raw_elements = call_ai_generator(args.prompt, cfg,
+            resp = call_ai_generator(args.prompt, cfg,
                                              temperature=args.temperature)
     except AIGeneratorError as e:
         print(f"[ERROR] 生成失败: {e}", file=sys.stderr)
         return 1
+
+    if isinstance(resp, AIResponse):
+        raw_elements = resp.elements
+    else:
+        raw_elements = resp
 
     print(f"[2/3] normalize 后 {len(raw_elements)} 个原始元素")
     elements = normalize_elements(raw_elements)

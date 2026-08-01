@@ -104,6 +104,16 @@ AI_SYSTEM_PROMPT = "\n".join([
 ])
 
 
+@dataclass
+class AIResponse:
+    """AI 调用返回结果，包含 elements 与 token 用量。"""
+
+    elements: list[dict]
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
 class AIGeneratorError(RuntimeError):
     """AI 调用或解析失败。"""
 
@@ -189,8 +199,8 @@ _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 
 def call_ai_generator(prompt: str, cfg: ProviderConfig, *,
                       temperature: float = 0.7, timeout: int = 60,
-                      max_retries: int = 1) -> list[dict]:
-    """调用 AI，返回解析后的 elements 数组（未做 normalize）。
+                      max_retries: int = 1) -> AIResponse:
+    """调用 AI，返回 AIResponse（含 elements 与 token 用量）。
 
     对 429 / 5xx 自动重试 max_retries 次（默认 1 次），间隔 2s。
     其他错误（4xx 鉴权/格式）不重试，直接抛出。
@@ -247,25 +257,45 @@ def call_ai_generator(prompt: str, cfg: ProviderConfig, *,
     parsed = parse_ai_content(content)
     if not parsed or not isinstance(parsed.get("elements"), list):
         raise AIGeneratorError("AI 返回格式不正确，未找到 elements 数组")
-    return parsed["elements"]
+
+    # 提取 token 用量：OpenAI/DeepSeek 都返回 usage.{prompt_tokens,completion_tokens,total_tokens}
+    usage = data.get("usage") or {}
+    prompt_tokens = usage.get("prompt_tokens", 0) or 0
+    completion_tokens = usage.get("completion_tokens", 0) or 0
+    total_tokens = usage.get("total_tokens", 0) or (prompt_tokens + completion_tokens)
+    return AIResponse(
+        elements=parsed["elements"],
+        prompt_tokens=int(prompt_tokens),
+        completion_tokens=int(completion_tokens),
+        total_tokens=int(total_tokens),
+    )
 
 
-def fake_call_ai_generator(prompt: str, cfg: ProviderConfig, **_: Any) -> list[dict]:
-    """本地 mock，给 --dry-run 用。无需联网即可跑通链路。"""
-    return [
-        {"type": "text", "x": 40, "y": 40, "width": 1120, "height": 80,
-         "content": f"<h1>{prompt[:24]} - DEMO</h1>", "fontSize": 28, "textAlign": "center"},
-        {"type": "button", "x": 500, "y": 140, "width": 200, "height": 56,
-         "text": "开始体验", "bgColor": "#3b82f6", "textColor": "#fff", "radius": 8, "bold": True},
-        {"type": "card", "x": 40, "y": 240, "width": 540, "height": 220,
-         "imageSrc": "https://picsum.photos/seed/demo1/600/400", "title": "卡片一",
-         "desc": "由 Python 工作流 dry-run 生成的占位内容。", "bgColor": "#fff", "radius": 12},
-        {"type": "card", "x": 620, "y": 240, "width": 540, "height": 220,
-         "imageSrc": "https://picsum.photos/seed/demo2/600/400", "title": "卡片二",
-         "desc": "运行真实命令时会替换为 AI 内容。", "bgColor": "#fff", "radius": 12},
-        {"type": "image", "x": 40, "y": 500, "width": 1120, "height": 280,
-         "src": "https://picsum.photos/seed/banner/1200/400", "alt": "Banner"},
-    ]
+def fake_call_ai_generator(prompt: str, cfg: ProviderConfig, **_: Any) -> AIResponse:
+    """本地 mock，给 --dry-run 用。无需联网即可跑通链路。
+
+    返回 AIResponse，并在 dry-run 时回填一组 demo token 计数，
+    让运行流程的 token/cost 统计路径同样被走通。
+    """
+    return AIResponse(
+        elements=[
+            {"type": "text", "x": 40, "y": 40, "width": 1120, "height": 80,
+             "content": f"<h1>{prompt[:24]} - DEMO</h1>", "fontSize": 28, "textAlign": "center"},
+            {"type": "button", "x": 500, "y": 140, "width": 200, "height": 56,
+             "text": "开始体验", "bgColor": "#3b82f6", "textColor": "#fff", "radius": 8, "bold": True},
+            {"type": "card", "x": 40, "y": 240, "width": 540, "height": 220,
+             "imageSrc": "https://picsum.photos/seed/demo1/600/400", "title": "卡片一",
+             "desc": "由 Python 工作流 dry-run 生成的占位内容。", "bgColor": "#fff", "radius": 12},
+            {"type": "card", "x": 620, "y": 240, "width": 540, "height": 220,
+             "imageSrc": "https://picsum.photos/seed/demo2/600/400", "title": "卡片二",
+             "desc": "运行真实命令时会替换为 AI 内容。", "bgColor": "#fff", "radius": 12},
+            {"type": "image", "x": 40, "y": 500, "width": 1120, "height": 280,
+             "src": "https://picsum.photos/seed/banner/1200/400", "alt": "Banner"},
+        ],
+        prompt_tokens=120,
+        completion_tokens=280,
+        total_tokens=400,
+    )
 
 
 def safe_filename(name: str, fallback: str = "page") -> str:

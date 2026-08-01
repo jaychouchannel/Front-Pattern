@@ -29,6 +29,7 @@ sys.path.insert(0, _THIS_DIR)
 from ai_client import (
     AI_PROVIDERS,
     ProviderConfig,
+    AIResponse,
     AIGeneratorError,
     call_ai_generator,
     fake_call_ai_generator,
@@ -36,6 +37,27 @@ from ai_client import (
 )
 from normalize import normalize_elements
 from html_export import write_html_file, write_json_file
+
+
+# 模型单价（美元 / 1M tokens）——估算成本用，价格可能变动，仅供参考。
+# 0 表示未知，会在报表里标为 "-"。
+_MODEL_PRICES_PER_1M = {
+    "deepseek-chat":   {"input": 0.27, "output": 1.10},
+    "deepseek-reasoner": {"input": 0.55, "output": 2.19},
+    "gpt-4o-mini":     {"input": 0.15, "output": 0.60},
+    "gpt-4o":          {"input": 2.50, "output": 10.00},
+    "gpt-4.1-mini":    {"input": 0.40, "output": 1.60},
+}
+# 未知模型回退价：按输入偏高估一个保守值，避免账单吓一跳
+_FALLBACK_PRICE = {"input": 1.00, "output": 3.00}
+
+
+def _estimate_cost(prompt_tokens: int, completion_tokens: int, model: str) -> tuple[float, bool]:
+    """估算美元成本。返回 (cost, known)。known=False 表示价格表没有该模型，用回退价。"""
+    price = _MODEL_PRICES_PER_1M.get(model, _FALLBACK_PRICE)
+    known = model in _MODEL_PRICES_PER_1M
+    cost = (prompt_tokens * price["input"] + completion_tokens * price["output"]) / 1_000_000
+    return cost, known
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -57,6 +79,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--strict", action="store_true",
                         help="任一文件失败即立即终止（默认继续跑剩余的）")
+    parser.add_argument("--cost-report", type=str, default=None,
+                        metavar="FILE",
+                        help="将 token/cost 统计写入 JSON 文件")
     parser.add_argument("--html-only", action="store_true")
     parser.add_argument("--json-only", action="store_true")
     return parser.parse_args(argv)
@@ -159,15 +184,22 @@ def main(argv: list[str] | None = None) -> int:
     cfg = (ProviderConfig.from_name(args.provider, api_key,
                                     model=args.model, base_url=args.base_url)
            if not args.dry_run else None)
+    model_label = cfg.model if cfg else (args.model or AI_PROVIDERS[args.provider]["model"])
 
     print(f"==== AI 批量工作流 ====")
     print(f"  provider : {args.provider}"
-          f"{f' (model={cfg.model})' if cfg else ' (dry-run)'}")
+          f" (model={model_label})"
+          f"{' [dry-run]' if args.dry_run else ''}")
     print(f"  prompts  : {prompts_dir} ({len(prompt_files)} 个文件)")
     print(f"  output   : {out_dir}")
     print()
 
     succ = fail = 0
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_cost = 0.0
+    cost_known = True
+    file_reports: list[dict] = []
     for i, txt_path in enumerate(prompt_files, 1):
         name, prompt = _parse_prompt_file(txt_path)
         print(f"[{i}/{len(prompt_files)}] {txt_path.name} -> {safe_filename(name)}")
@@ -177,10 +209,14 @@ def main(argv: list[str] | None = None) -> int:
 
         try:
             if args.dry_run:
-                raw = fake_call_ai_generator(prompt, cfg)
+                resp = fake_call_ai_generator(prompt, cfg)
             else:
-                raw = call_ai_generator(prompt, cfg, temperature=args.temperature)
-            elements = normalize_elements(raw)
+                resp = call_ai_generator(prompt, cfg, temperature=args.temperature)
+            if not isinstance(resp, AIResponse):
+                # 兼容旧版返回 list[dict] 的情况
+                raw = resp
+                resp = AIResponse(elements=raw, prompt_tokens=0, completion_tokens=0, total_tokens=0)
+            elements = normalize_elements(resp.elements)
             if not elements:
                 raise AIGeneratorError("normalize 后无有效元素")
         except AIGeneratorError as e:
@@ -189,6 +225,24 @@ def main(argv: list[str] | None = None) -> int:
             if args.strict:
                 return 1
             continue
+
+        # 累计 token / 成本
+        pp = resp.prompt_tokens
+        cc = resp.completion_tokens
+        total_prompt_tokens += pp
+        total_completion_tokens += cc
+        cost, known = _estimate_cost(pp, cc, model_label)
+        total_cost += cost
+        if not known:
+            cost_known = False
+        file_reports.append({
+            "file": txt_path.name,
+            "page": name,
+            "prompt_tokens": pp,
+            "completion_tokens": cc,
+            "total_tokens": pp + cc,
+            "cost_usd": round(cost, 6),
+        })
 
         prefix = out_dir / safe_filename(name)
         json_path = str(prefix) + ".json"
@@ -204,6 +258,29 @@ def main(argv: list[str] | None = None) -> int:
 
     print()
     print(f"==== 完成：成功 {succ}，失败 {fail} ====")
+    if total_prompt_tokens or total_completion_tokens:
+        print(f"  Token 统计：prompt {total_prompt_tokens:,} / completion {total_completion_tokens:,} / total {total_prompt_tokens + total_completion_tokens:,}")
+        label = f"  估算成本：${total_cost:.4f} USD（{model_label}）"
+        if not cost_known:
+            label += "（价格表未覆盖该模型，按回退价估算，仅供参考）"
+        print(label)
+    if args.cost_report and file_reports:
+        import json as _json
+        report = {
+            "provider": args.provider,
+            "model": model_label,
+            "files": file_reports,
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_tokens": total_prompt_tokens + total_completion_tokens,
+            "total_cost_usd": round(total_cost, 6),
+            "price_per_1M_known": cost_known,
+        }
+        Path(args.cost_report).write_text(
+            _json.dumps(report, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        print(f"  成本报表已写入：{args.cost_report}")
     return 0 if fail == 0 else 2
 
 
