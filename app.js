@@ -1339,6 +1339,7 @@ function togglePreview() {
   if (_previewMode) {
     body.classList.add('preview-mode');
     state.selectedElementId = null;
+    state.selectedElementIds = [];
     btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18M9 21V9"/></svg><span>编辑</span>';
     deviceSel.classList.remove('hidden');
     applyDeviceSize();
@@ -1572,10 +1573,12 @@ function downloadHTML() {
 
 var STORAGE_KEY = 'puzzle_builder_project';
 var AI_CONFIG_KEY = 'puzzle_builder_ai_config';
+var SCHEMA_VERSION = 1;
 
 function saveProject(silent) {
   try {
     var data = {
+      schemaVersion: SCHEMA_VERSION,
       pages: state.pages,
       currentPageId: state.currentPageId,
       savedAt: new Date().toISOString()
@@ -1587,19 +1590,76 @@ function saveProject(silent) {
   }
 }
 
+function _clampNum(v, def, min, max) {
+  var n = Number(v);
+  if (isNaN(n) || !isFinite(n)) return def;
+  if (min != null) n = Math.max(min, n);
+  if (max != null) n = Math.min(max, n);
+  return n;
+}
+
+function _normalizeElement(el) {
+  if (!el || typeof el !== 'object' || !el.type) return null;
+  if (['text', 'image', 'video', 'button', 'card'].indexOf(el.type) === -1) return null;
+  var clean = {};
+  Object.keys(el).forEach(function(k) { clean[k] = el[k]; });
+  clean.id = clean.id || uid();
+  ['x', 'y', 'width', 'height'].forEach(function(k) {
+    clean[k] = _clampNum(clean[k], k === 'x' || k === 'y' ? 0 : 200, 0, 2000);
+  });
+  ['fontSize', 'padding', 'radius'].forEach(function(k) {
+    if (clean[k] != null) clean[k] = Math.max(0, Number(clean[k]) || 0);
+  });
+  if (clean.color != null && clean.color !== 'undefined') clean.color = String(clean.color);
+  if (clean.textAlign && ['left', 'center', 'right'].indexOf(clean.textAlign) === -1) clean.textAlign = 'left';
+  return clean;
+}
+
+function validateProject(data) {
+  if (!data || typeof data !== 'object') return false;
+  if (!data.pages || typeof data.pages !== 'object' || Array.isArray(data.pages)) return false;
+  var keys = Object.keys(data.pages);
+  if (keys.length === 0) return false;
+  var valid = {};
+  keys.forEach(function(k) {
+    var page = data.pages[k];
+    if (!page || typeof page !== 'object' || !page.id || !Array.isArray(page.elements)) return;
+    var normalized = page.elements.map(_normalizeElement).filter(Boolean);
+    valid[k] = { id: page.id, name: page.name || ('page_' + k), elements: normalized };
+  });
+  if (Object.keys(valid).length === 0) return false;
+  var currentPageId = data.currentPageId;
+  if (!currentPageId || !valid[currentPageId]) {
+    currentPageId = Object.keys(valid)[0];
+  }
+  valid._meta = { schemaVersion: data.schemaVersion || 0, currentPageId: currentPageId };
+  return valid;
+}
+
 function loadProject() {
   try {
     var raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return false;
     var data = JSON.parse(raw);
-    if (!data.pages) return false;
-    state.pages = data.pages;
-    state.currentPageId = data.currentPageId || Object.keys(data.pages)[0];
+    var validated = validateProject(data);
+    if (!validated) {
+      console.warn('[loadProject] 数据校验失败，已回退到示例页', data);
+      showToast('项目数据已损坏，已加载示例页；建议用「导出HTML」备份');
+      return false;
+    }
+    state.pages = {};
+    Object.keys(validated).forEach(function(k) {
+      if (k === '_meta') return;
+      state.pages[k] = validated[k];
+    });
+    state.currentPageId = validated._meta.currentPageId;
     state.selectedElementId = null;
+    state.selectedElementIds = [];
     state.history = { past: [], future: [] };
     return true;
   } catch (e) {
-    console.error('加载项目失败', e);
+    console.warn('[loadProject] 加载失败，回退示例页', e);
+    showToast('项目数据已损坏，已加载示例页');
     return false;
   }
 }
@@ -1984,6 +2044,20 @@ function handleKeydown(e) {
   // 在输入框中不响应
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
+  // 叠加层可见时只响应 Escape（关闭叠加层），其他键一律拒绝，避免穿透删除画布元素
+  var pickerOv = document.getElementById('picker-overlay');
+  var helpOv = document.getElementById('help-overlay');
+  var overlayOpen = (pickerOv && !pickerOv.classList.contains('hidden')) ||
+                    (helpOv && !helpOv.classList.contains('hidden'));
+  if (overlayOpen) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (pickerOv && !pickerOv.classList.contains('hidden')) { closePicker(); }
+      else if (helpOv && !helpOv.classList.contains('hidden')) { helpOv.classList.add('hidden'); }
+    }
+    return;
+  }
+
   if (e.ctrlKey || e.metaKey) {
     if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
     else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); redo(); }
@@ -2005,7 +2079,14 @@ function handleKeydown(e) {
     return;
   }
 
+  // 工具栏按钮聚焦时，Backspace/Delete 不触发删除（用户可能在按撤销，但焦点在按钮上）
+  if (e.target.closest && e.target.closest('button')) {
+    if (e.key === 'Delete' || e.key === 'Backspace') return;
+  }
+
+  // 预览模式下拒绝删除键，避免静默删除（该模式无选中视觉提示）
   if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (isPreviewMode()) return;
     if (effectiveSelectedIds().length > 0) {
       e.preventDefault();
       deleteSelectedElements();
@@ -2014,7 +2095,7 @@ function handleKeydown(e) {
 
   // 方向键微调（1px，shift+方向键 10px）
   var ids = effectiveSelectedIds();
-  if (ids.length > 0 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].indexOf(e.key) !== -1) {
+  if (!isPreviewMode() && ids.length > 0 && ['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].indexOf(e.key) !== -1) {
     e.preventDefault();
     var step = e.shiftKey ? 10 : 1;
     if (!_arrowMoveStarted) { pushHistory(); _arrowMoveStarted = true; }
