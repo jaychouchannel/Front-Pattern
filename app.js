@@ -418,39 +418,38 @@ function elementInnerHTML(el) {
              (el.content || '') + '</div>';
 
     case 'image':
-      return '<div class="el-image"><img src="' + (el.src||'') + '" alt="' + (el.alt||'') + '" style="object-fit:' + (el.objectFit||'cover') + '"></div>';
+      return '<div class="el-image"><img src="' + escapeHtml(el.src||'') + '" alt="' + escapeHtml(el.alt||'') + '" style="object-fit:' + (el.objectFit||'cover') + '"></div>';
 
     case 'video':
       if (el.src) {
         return '<div class="el-video">' +
                (el.src.includes('youtube') || el.src.includes('bilibili') ?
-                 '<iframe src="' + el.src + '" allowfullscreen></iframe>' :
-                 '<video src="' + el.src + '" controls></video>') +
+                 '<iframe src="' + escapeHtml(el.src) + '" allowfullscreen></iframe>' :
+                 '<video src="' + escapeHtml(el.src) + '" controls></video>') +
                '</div>';
       }
-      return '<div class="el-video"><div class="placeholder">\uD83C\uDFAC<span>' + (el.placeholder||'设置视频URL') + '</span></div></div>';
+      return '<div class="el-video"><div class="placeholder">\uD83C\uDFAC<span>' + escapeHtml(el.placeholder||'设置视频URL') + '</span></div></div>';
 
     case 'button':
       var extra = '';
       if (el.link) {
         if (el.link.type === 'page') {
-          var targetPage = state.pages[el.link.target];
-          extra = ' data-link-page="' + el.link.target + '"';
+          extra = ' data-link-page="' + escapeHtml(el.link.target) + '"';
         } else if (el.link.type === 'url') {
-          extra = ' data-link-url="' + el.link.target + '"';
+          extra = ' data-link-url="' + escapeHtml(el.link.target) + '"';
         }
       }
       var bold = el.bold ? 'font-weight:600;' : '';
       return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius!=null?el.radius:8) + 'px;' + bold + '"' + extra + '>' +
-             (el.text || '按钮') + '</button></div>';
+             escapeHtml(el.text || '按钮') + '</button></div>';
 
     case 'card':
       return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius!=null?el.radius:8) + 'px">' +
              '<div class="card-img">' +
-             (el.imageSrc ? '<img src="' + el.imageSrc + '">' : '\uD83D\uDDBC') +
+             (el.imageSrc ? '<img src="' + escapeHtml(el.imageSrc) + '">' : '\uD83D\uDDBC') +
              '</div>' +
-             '<div class="card-body"><div class="card-title">' + (el.title||'标题') + '</div>' +
-             '<div class="card-desc">' + (el.desc||'') + '</div></div></div>';
+             '<div class="card-body"><div class="card-title">' + escapeHtml(el.title||'标题') + '</div>' +
+             '<div class="card-desc">' + escapeHtml(el.desc||'') + '</div></div></div>';
 
     default:
       return '<div style="padding:20px;color:#999">未知组件</div>';
@@ -1131,8 +1130,8 @@ function textProps(el) {
 
 function imageProps(el) {
   return '' +
-    '<div class="prop-group"><label>图片地址 URL</label><input type="text" id="prop-src" value="' + el.src + '" placeholder="https://..."></div>' +
-    '<div class="prop-group"><label>替代文本 (alt)</label><input type="text" id="prop-alt" value="' + el.alt + '"></div>' +
+    '<div class="prop-group"><label>图片地址 URL</label><input type="text" id="prop-src" value="' + escapeHtml(el.src) + '" placeholder="https://..."></div>' +
+    '<div class="prop-group"><label>替代文本 (alt)</label><input type="text" id="prop-alt" value="' + escapeHtml(el.alt) + '"></div>' +
     '<div class="prop-group"><label>圆角</label><input type="number" id="prop-radius" value="' + el.radius + '" min="0" max="100"></div>' +
     '<div class="prop-group"><label>适配方式</label><select id="prop-objectFit">' +
       '<option value="cover"' + (el.objectFit==='cover'?' selected':'') + '>填充裁剪 (cover)</option>' +
@@ -1143,8 +1142,8 @@ function imageProps(el) {
 
 function videoProps(el) {
   return '' +
-    '<div class="prop-group"><label>视频地址 URL</label><input type="text" id="prop-src" value="' + el.src + '" placeholder="可直接填 .mp4 或 YouTube/B站 embed 链接"></div>' +
-    '<div class="prop-group"><label>占位提示文本</label><input type="text" id="prop-placeholder" value="' + el.placeholder + '"></div>';
+    '<div class="prop-group"><label>视频地址 URL</label><input type="text" id="prop-src" value="' + escapeHtml(el.src) + '" placeholder="可直接填 .mp4 或 YouTube/B站 embed 链接"></div>' +
+    '<div class="prop-group"><label>占位提示文本</label><input type="text" id="prop-placeholder" value="' + escapeHtml(el.placeholder) + '"></div>';
 }
 
 function buttonProps(el) {
@@ -1157,7 +1156,7 @@ function buttonProps(el) {
     '<div id="prop-link-target-wrap" class="mt-2"></div>' +
     '</div>';
   return '' +
-    '<div class="prop-group"><label>按钮文字</label><input type="text" id="prop-text" value="' + el.text + '"></div>' +
+    '<div class="prop-group"><label>按钮文字</label><input type="text" id="prop-text" value="' + escapeHtml(el.text) + '"></div>' +
     '<div class="prop-group"><label>背景色</label><input type="color" id="prop-bgColor" value="' + el.bgColor + '"></div>' +
     '<div class="prop-group"><label>文字颜色</label><input type="color" id="prop-textColor" value="' + el.textColor + '"></div>' +
     '<div class="prop-group"><label>字体大小</label><input type="number" id="prop-fontSize" value="' + el.fontSize + '" min="10" max="40"></div>' +
@@ -1167,9 +1166,9 @@ function buttonProps(el) {
 
 function cardProps(el) {
   return '' +
-    '<div class="prop-group"><label>卡片图片 URL</label><input type="text" id="prop-imageSrc" value="' + el.imageSrc + '"></div>' +
-    '<div class="prop-group"><label>标题</label><input type="text" id="prop-title" value="' + el.title + '"></div>' +
-    '<div class="prop-group"><label>描述</label><textarea id="prop-desc">' + el.desc + '</textarea></div>' +
+    '<div class="prop-group"><label>卡片图片 URL</label><input type="text" id="prop-imageSrc" value="' + escapeHtml(el.imageSrc) + '"></div>' +
+    '<div class="prop-group"><label>标题</label><input type="text" id="prop-title" value="' + escapeHtml(el.title) + '"></div>' +
+    '<div class="prop-group"><label>描述</label><textarea id="prop-desc">' + escapeHtml(el.desc) + '</textarea></div>' +
     '<div class="prop-group"><label>背景色</label><input type="color" id="prop-bgColor" value="' + el.bgColor + '"></div>' +
     '<div class="prop-group"><label>圆角</label><input type="number" id="prop-radius" value="' + el.radius + '" min="0" max="50"></div>';
 }
@@ -1290,7 +1289,7 @@ function bindButtonLink(el) {
     if (v === 'page') {
       var opts = Object.values(state.pages)
         .filter(function(p) { return p.id !== state.currentPageId; })
-        .map(function(p) { return '<option value="' + p.id + '"' + (el.link && el.link.target===p.id ? ' selected' : '') + '>' + p.name + '</option>'; })
+        .map(function(p) { return '<option value="' + escapeHtml(p.id) + '"' + (el.link && el.link.target===p.id ? ' selected' : '') + '>' + escapeHtml(p.name) + '</option>'; })
         .join('');
       if (!opts) opts = '<option value="">暂无其他页面，请先在左侧新建</option>';
       wrap.innerHTML = '<select id="prop-link-page" class="w-full">' + opts + '</select>';
@@ -1302,11 +1301,18 @@ function bindButtonLink(el) {
       });
     } else if (v === 'url') {
       var cur = el.link && el.link.type === 'url' ? el.link.target : '';
-      wrap.innerHTML = '<input type="text" id="prop-link-url" value="' + cur + '" placeholder="https://example.com">';
+      wrap.innerHTML = '<input type="text" id="prop-link-url" value="' + escapeHtml(cur) + '" placeholder="https://example.com">';
       var urlInput = document.getElementById('prop-link-url');
       urlInput.addEventListener('change', function() {
+        var u = urlInput.value.trim();
+        // 只放行 http(s)，阻断 javascript: 等伪协议进入跳转链路
+        if (u && !/^https?:\/\//i.test(u)) {
+          showToast('外部链接需以 http:// 或 https:// 开头');
+          urlInput.value = cur;
+          return;
+        }
         pushHistory();
-        el.link = { type: 'url', target: urlInput.value };
+        el.link = { type: 'url', target: u };
         renderElements();
       });
     } else {
@@ -1393,8 +1399,8 @@ function previewClickHandler(e) {
     renderAll();
     document.getElementById('canvas-area').scrollTo(0, 0);
     showToast('跳转到：' + state.pages[pageId].name);
-  } else if (url) {
-    window.open(url, '_blank');
+  } else if (url && /^https?:\/\//i.test(url)) {
+    window.open(url, '_blank', 'noopener');
   }
 }
 
@@ -1489,7 +1495,7 @@ function exportHTML() {
 '    var pageId = b.getAttribute("data-link-page");\n' +
 '    var url = b.getAttribute("data-link-url");\n' +
 '    if (pageId) { location.hash = pageId; showPage(); window.scrollTo(0,0); }\n' +
-'    else if (url) { window.open(url, "_blank"); }\n' +
+'    else if (url && /^https?:/i.test(url)) { window.open(url, "_blank", "noopener"); }\n' +
 '  });\n' +
 '  // 响应式：根据屏幕宽度自适应缩放\n' +
 '  function fitStage() {\n' +
@@ -1531,26 +1537,26 @@ function exportElementHTML(el) {
       return '<div class="el-text" style="padding:' + el.padding + 'px;text-align:' + (el.textAlign||'left') + ';font-size:' + (el.fontSize||15) + 'px;color:' + (el.color||'#1f2937') + '">' +
              (el.content || '') + '</div>';
     case 'image':
-      return '<div class="el-image"><img src="' + (el.src||'') + '" alt="' + (el.alt||'') + '" style="object-fit:' + (el.objectFit||'cover') + '"></div>';
+      return '<div class="el-image"><img src="' + escapeHtml(el.src||'') + '" alt="' + escapeHtml(el.alt||'') + '" style="object-fit:' + (el.objectFit||'cover') + '"></div>';
     case 'video':
       if (!el.src) return '';
       return '<div class="el-video">' +
              (el.src.indexOf('youtube')>=0 || el.src.indexOf('bilibili')>=0 ?
-               '<iframe src="' + el.src + '" allowfullscreen></iframe>' :
-               '<video src="' + el.src + '" controls></video>') + '</div>';
+               '<iframe src="' + escapeHtml(el.src) + '" allowfullscreen></iframe>' :
+               '<video src="' + escapeHtml(el.src) + '" controls></video>') + '</div>';
     case 'button':
       var attr = '';
       if (el.link) {
-        if (el.link.type === 'page') attr = ' data-link-page="' + el.link.target + '"';
-        else if (el.link.type === 'url') attr = ' data-link-url="' + el.link.target + '"';
+        if (el.link.type === 'page') attr = ' data-link-page="' + escapeHtml(el.link.target) + '"';
+        else if (el.link.type === 'url') attr = ' data-link-url="' + escapeHtml(el.link.target) + '"';
       }
       var bold = el.bold ? 'font-weight:600;' : '';
-      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius!=null?el.radius:8) + 'px;' + bold + '"' + attr + '>' + (el.text||'按钮') + '</button></div>';
+      return '<div class="el-button"><button style="background:' + (el.bgColor||'#3b82f6') + ';color:' + (el.textColor||'#fff') + ';font-size:' + (el.fontSize||15) + 'px;border-radius:' + (el.radius!=null?el.radius:8) + 'px;' + bold + '"' + attr + '>' + escapeHtml(el.text||'按钮') + '</button></div>';
     case 'card':
       return '<div class="el-card" style="background:' + (el.bgColor||'#fff') + ';border-radius:' + (el.radius!=null?el.radius:8) + 'px">' +
-             '<div class="card-img">' + (el.imageSrc ? '<img src="' + el.imageSrc + '">' : '🖼') + '</div>' +
-             '<div class="card-body"><div class="card-title">' + (el.title||'标题') + '</div>' +
-             '<div class="card-desc">' + (el.desc||'') + '</div></div></div>';
+             '<div class="card-img">' + (el.imageSrc ? '<img src="' + escapeHtml(el.imageSrc) + '">' : '🖼') + '</div>' +
+             '<div class="card-body"><div class="card-title">' + escapeHtml(el.title||'标题') + '</div>' +
+             '<div class="card-desc">' + escapeHtml(el.desc||'') + '</div></div></div>';
   }
   return '';
 }
