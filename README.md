@@ -252,6 +252,8 @@ netlify deploy
 |---|---|
 | `puzzle_builder_project` | 完整项目数据（pages、currentPageId、保存时间） |
 
+**自动保存**：每次编辑操作后约 0.8 秒自动写入 localStorage；关闭页面前也会同步落盘一次。`Ctrl+S` 可立即手动保存。
+
 **清空重来**：
 ```js
 // 浏览器控制台执行

@@ -111,6 +111,7 @@ function pushHistory() {
   if (state.history.past.length > 50) state.history.past.shift();
   state.history.future = [];
   updateUndoRedoButtons();
+  scheduleAutosave();
 }
 
 function _makeSnapshot() {
@@ -1561,6 +1562,14 @@ function downloadHTML() {
 
 var STORAGE_KEY = 'puzzle_builder_project';
 var AI_CONFIG_KEY = 'puzzle_builder_ai_config';
+var AUTOSAVE_DELAY_MS = 800;
+
+/** 防抖自动保存：所有编辑都经过 pushHistory，在此挂接即可覆盖全部变更入口 */
+var _autoSaveTimer = null;
+function scheduleAutosave() {
+  if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+  _autoSaveTimer = setTimeout(function() { saveProject(true); }, AUTOSAVE_DELAY_MS);
+}
 
 function saveProject(silent) {
   try {
@@ -1925,6 +1934,12 @@ function init() {
 
   // 快捷键
   document.addEventListener('keydown', handleKeydown);
+
+  // 关页兜底：防抖自动保存可能还差最后一口，退出前同步落盘
+  window.addEventListener('beforeunload', function() {
+    if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+    saveProject(true);
+  });
 
   // 首次进入显示帮助
   setTimeout(function() {
