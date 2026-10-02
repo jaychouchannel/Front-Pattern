@@ -460,17 +460,15 @@ function elementInnerHTML(el) {
 
 var _dragState = null;
 
-/** 点击元素选中 */
+/** 点击元素选中。纯选中状态变化不入撤销栈（选中集随快照一并保存），避免浏览操作挤掉真实编辑记录 */
 function selectElementById(id, multi) {
   if (multi) {
-    pushHistory();
     toggleSelected(id);
     renderElements();
     renderPropertyPanel();
     return;
   }
   if (state.selectedElementId === id && (state.selectedElementIds||[]).length === 0) return;
-  pushHistory();
   setSelected(id);
   renderElements();
   renderPropertyPanel();
@@ -479,7 +477,6 @@ function selectElementById(id, multi) {
 /** 清除选中 */
 function deselectElement() {
   if (!state.selectedElementId && (state.selectedElementIds||[]).length === 0) return;
-  pushHistory();
   clearSelection();
   renderElements();
   renderPropertyPanel();
@@ -604,11 +601,10 @@ function pasteClipboard() {
   showToast('已粘贴 ' + state._clipboard.length + ' 个模块');
 }
 
-/** 克隆（Ctrl+D）：复制并原地粘贴 */
+/** 克隆（Ctrl+D）：复制并原地粘贴。pushHistory 由 pasteClipboard 负责，避免连续入栈两条 */
 function duplicateSelected() {
   var ids = effectiveSelectedIds();
   if (ids.length === 0) return;
-  pushHistory();
   state._clipboard = [];
   ids.forEach(function(id) {
     var el = currentElements().find(function(e) { return e.id === id; });
@@ -749,7 +745,6 @@ function setupCanvasInteraction() {
         var elId = elDiv.dataset.elId;
         if (shiftKey) {
           // shift+click：切换多选
-          pushHistory();
           toggleSelected(elId);
           renderElements();
           renderPropertyPanel();
@@ -757,7 +752,6 @@ function setupCanvasInteraction() {
         }
         // 普通点击：单选
         if (!isSelected(elId)) {
-          pushHistory();
           setSelected(elId);
           renderElements();
           renderPropertyPanel();
@@ -825,7 +819,6 @@ function setupCanvasInteraction() {
           return el.x < right && elR > left && el.y < bottom && elB > top;
         });
         if (hits.length > 0) {
-          pushHistory();
           // 替换为这些选中
           state.selectedElementIds = hits.map(function(e) { return e.id; });
           state.selectedElementId = hits[0].id;
@@ -1261,11 +1254,14 @@ function bindText(el, inputId, key) {
 function bindColor(el, inputId, key) {
   var inp = document.getElementById(inputId);
   if (!inp) return;
+  // 取色器拖动会连续触发 input：仅首次入栈记录初始值，后续只实时更新，避免刷爆历史栈
+  var interactionPushed = false;
   inp.addEventListener('input', function() {
-    pushHistory();
+    if (!interactionPushed) { pushHistory(); interactionPushed = true; }
     el[key] = inp.value;
     renderElements();
   });
+  inp.addEventListener('change', function() { interactionPushed = false; });
 }
 
 function bindSelect(el, inputId, key) {
@@ -2075,7 +2071,6 @@ function handleKeydown(e) {
       e.preventDefault();
       // 全选当前页元素
       if (currentElements().length > 0) {
-        pushHistory();
         state.selectedElementIds = currentElements().map(function(el) { return el.id; });
         state.selectedElementId = state.selectedElementIds[0];
         renderElements();
