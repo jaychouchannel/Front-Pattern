@@ -690,10 +690,16 @@ function makeResizable(div, el) {
       var dir = h.dataset.handle;
       var startX = e.clientX, startY = e.clientY;
       var orig = { x: el.x, y: el.y, w: el.width, h: el.height };
+      var historyPushed = false;
 
       function onMove(ev) {
         var dx = ev.clientX - startX;
         var dy = ev.clientY - startY;
+        // 与 makeDraggable 一致：首次实际移动才入栈，避免点选手柄产生空快照
+        if (!historyPushed && (Math.abs(dx) > 1 || Math.abs(dy) > 1)) {
+          pushHistory();
+          historyPushed = true;
+        }
         if (dir.includes('e')) { el.width = Math.max(40, orig.w + dx); }
         if (dir.includes('w')) {
           // 先按原始 dx 算新 width 与新 x，再 clamp，避免先 clamp x 导致 width 反向增长
